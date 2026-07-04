@@ -94,8 +94,13 @@ export const SectionWrapper: React.FC<SectionWrapperProps> = ({
       `}
       style={{}}
     >
-      {/* Side Action panel — always visible */}
-      <div className="absolute left-2 top-1/2 -translate-y-1/2 flex flex-col items-center gap-1.5 p-1 rounded-md bg-slate-950 border border-slate-800 shadow-lg no-print z-10 opacity-90 hover:opacity-100">
+      {/* Side Action panel — hidden by default, appears on hover. Positioned
+          just outside the page padding so it sits in the empty area beside
+          the A4 sheet. */}
+      <div className={`absolute top-1/2 -translate-y-1/2 flex flex-col items-center gap-1.5 p-1 rounded-md bg-slate-950 border border-slate-800 shadow-lg transition-opacity duration-200 no-print z-10
+        ${isHovered || isActive ? 'opacity-100' : 'opacity-0 pointer-events-none'}`}
+        style={{ left: `calc(-1 * 60px - 4px)` }}
+      >
         <div
           onPointerDown={handleGripPointerDown}
           className="p-1 cursor-grab hover:bg-slate-800 rounded text-slate-400 hover:text-slate-200 active:cursor-grabbing select-none"
