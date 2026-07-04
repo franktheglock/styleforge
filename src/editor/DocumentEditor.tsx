@@ -56,15 +56,19 @@ export const buildStyleObject = (props: StyleProperties): React.CSSProperties =>
 };
 
 // Section Editor wrapper for individual Tiptap instances
-const SectionEditor: React.FC<{ section: Section; tokens: Record<string, StyleProperties> }> = ({
-  section,
-  tokens,
-}) => {
+const SectionEditor: React.FC<{
+  section: Section;
+  tokens: Record<string, StyleProperties>;
+  isActive: boolean;
+}> = ({ section, tokens, isActive }) => {
   const updateSectionContent = useDocumentStore((state) => state.updateSectionContent);
   const resolved = resolveStyle(section.styleToken, tokens);
   const styleObj = buildStyleObject(resolved);
   // Guard against onUpdate/setContent ping-pong that can grow the doc.
   const syncingRef = React.useRef(false);
+  // Track whether we've already focused for this activation so the second
+  // click inside the editor doesn't yank the caret somewhere unexpected.
+  const focusedForActivationRef = React.useRef(false);
 
   const editor = useEditor({
     extensions: [
@@ -104,6 +108,25 @@ const SectionEditor: React.FC<{ section: Section; tokens: Record<string, StylePr
       setTimeout(() => { syncingRef.current = false; }, 0);
     }
   }, [section.content, editor]);
+
+  // When this section becomes active, auto-focus the editor so the user can
+  // start typing immediately. Only focus on the transition from inactive ->
+  // active; don't keep stealing focus while the section is already active.
+  useEffect(() => {
+    if (!editor) return;
+    if (!isActive) {
+      focusedForActivationRef.current = false;
+      return;
+    }
+    if (focusedForActivationRef.current) return;
+    focusedForActivationRef.current = true;
+    // Defer to next tick so the click that selected the section can finish
+    // its event handling before we move focus into the contenteditable.
+    const t = setTimeout(() => {
+      try { editor.commands.focus('end'); } catch (_) { /* editor not mounted yet */ }
+    }, 0);
+    return () => clearTimeout(t);
+  }, [isActive, editor]);
 
   // Apply custom styling for lists and dividers
   const listClass = section.type === 'list' && resolved.listStyleType ? `list-${resolved.listStyleType}` : '';
@@ -329,6 +352,7 @@ export const DocumentEditor: React.FC = () => {
                         <SectionEditor
                           section={sec}
                           tokens={currentDocument.styleProfile.tokens}
+                          isActive={activeSectionId === sec.id}
                         />
                       </SectionWrapper>
                     </div>
