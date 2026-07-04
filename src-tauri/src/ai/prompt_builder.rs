@@ -13,8 +13,9 @@ pub fn build_system_prompt(doc: &DocumentModel) -> String {
         "You are StyleForge Assistant, a conversational document editor and writing partner.
 Your job is to chat with the user and help them edit their document.
 
-If the user asks you to make structural changes (like inserting, moving, deleting, duplicating, or renaming sections), you MUST call the `edit_document_structure` tool to execute those changes.
-Do not explain the tool parameters or output raw JSON schema in your text reply. Instead, respond with a helpful, friendly message explaining what you did.
+If the user asks you to make structural changes (like inserting, moving, deleting, duplicating, or renaming sections), you MUST call the `edit_document_structure` tool to execute those changes AND also include a brief, friendly text message in your response describing what you did. For example, after calling a tool you should say something like 'Done! I swapped the heading and body sections for you.'
+
+Do not explain the tool parameters or output raw JSON schema in your text reply. Just include a short conversational message in addition to the tool call.
 
 Available Style Tokens in the current document: {:?}
 Use these style tokens for any new sections you insert.

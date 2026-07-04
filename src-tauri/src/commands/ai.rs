@@ -495,11 +495,53 @@ pub async fn stream_ai_operations(
         }
     }
 
-    let assistant_message = full_text;
+    // If we applied tool calls but the model didn't send a final text response,
+    // do a second round so the reasoning model can produce its final answer
+    // after seeing the tool result.
+    let mut final_text = full_text.clone();
+    if ops_applied && final_text.is_empty() {
+        let tool_summary: Vec<String> = Vec::new(); // we don't re-derive here; just notify
+        let mut second_messages = vec![
+            ChatMessage {
+                role: "system".to_string(),
+                content: build_system_prompt(&doc),
+            },
+        ];
+        for m in &messages {
+            second_messages.push(m.clone());
+        }
+        // Tell the model the tool call completed and ask for its final answer
+        second_messages.push(ChatMessage {
+            role: "assistant".to_string(),
+            content: "[Tool call executed. Document updated.]".to_string(),
+        });
+        second_messages.push(ChatMessage {
+            role: "user".to_string(),
+            content: "Now respond conversationally about what you did.".to_string(),
+        });
+
+        let second_req = ChatRequest {
+            messages: second_messages,
+            temperature: Some(config.temperature),
+            max_tokens: Some(512),
+            tools: None,
+        };
+
+        let second_resp = match config.provider_type.as_str() {
+            "Ollama" => OllamaProvider.chat(&config, second_req).await?,
+            "LMStudio" => LMStudioProvider.chat(&config, second_req).await?,
+            "LlamaCpp" => LlamaCppProvider.chat(&config, second_req).await?,
+            "OpenRouter" => OpenRouterProvider.chat(&config, second_req).await?,
+            "NvidiaNim" => NvidiaNimProvider.chat(&config, second_req).await?,
+            _ => return Err(format!("Unsupported provider type: {}", config.provider_type)),
+        };
+
+        final_text = second_resp.content.clone().unwrap_or_default();
+    }
 
     Ok(AIResponsePayload {
         document: doc,
-        assistant_message,
+        assistant_message: final_text,
     })
 }
 
