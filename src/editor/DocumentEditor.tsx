@@ -131,33 +131,78 @@ const SectionEditor: React.FC<{ section: Section; tokens: Record<string, StylePr
 const A4_PAGE_HEIGHT = 1122; // A4 at 96dpi (297mm)
 const A4_PAGE_WIDTH = 794;   // A4 at 96dpi (210mm)
 const PAGE_PADDING = 60;
-// On-screen pages stack flush with no visual gap so content never falls into
-// the space between pages. The "Page N" label still marks the breaks.
-const PAGE_GAP = 0;
+// Small visible gap so page boundaries read as separate sheets on screen.
+const PAGE_GAP = 16;
 
 export const DocumentEditor: React.FC = () => {
   const { currentDocument, activeSectionId, setActiveSectionId, addSection } = useDocumentStore();
   const [zoom, setZoom] = useState(1.0);
-  const [numPages, setNumPages] = useState(1);
-  const contentRef = useRef<HTMLDivElement>(null);
+  // Heights of each section measured after each render. The map is keyed by
+  // section id and the values are pixel heights of the SectionWrapper.
+  const [heights, setHeights] = useState<Record<string, number>>({});
 
   const zoomIn = () => setZoom((z) => Math.min(z + 0.1, 1.5));
   const zoomOut = () => setZoom((z) => Math.max(z - 0.1, 0.6));
   const resetZoom = () => setZoom(1.0);
 
-  // Measure content height and compute page count
-  useEffect(() => {
-    const el = contentRef.current;
-    if (!el) return;
-    const observer = new ResizeObserver((entries) => {
-      for (const entry of entries) {
-        const h = entry.contentRect.height;
-        setNumPages(Math.max(1, Math.ceil(h / A4_PAGE_HEIGHT)));
-      }
+  // Ref callback used by SectionWrapper to publish its measured height to
+  // the parent. A rAF coalesces multiple updates into a single setState.
+  const sectionHeightRefs = useRef(new Map<string, HTMLDivElement>());
+  const measureRaf = useRef<number | null>(null);
+  const handleSectionMount = (id: string) => (el: HTMLDivElement | null) => {
+    if (el) sectionHeightRefs.current.set(id, el);
+    else sectionHeightRefs.current.delete(id);
+    if (measureRaf.current != null) return;
+    measureRaf.current = requestAnimationFrame(() => {
+      measureRaf.current = null;
+      const next: Record<string, number> = {};
+      sectionHeightRefs.current.forEach((el, id) => {
+        next[id] = el.getBoundingClientRect().height;
+      });
+      setHeights((prev) => {
+        // Skip state update if nothing actually changed (prevents feedback loop)
+        const prevKeys = Object.keys(prev);
+        const nextKeys = Object.keys(next);
+        if (prevKeys.length === nextKeys.length) {
+          let same = true;
+          for (const k of nextKeys) {
+            if (Math.abs((prev[k] || 0) - (next[k] || 0)) > 0.5) { same = false; break; }
+          }
+          if (same) return prev;
+        }
+        return next;
+      });
     });
-    observer.observe(el);
-    return () => observer.disconnect();
-  }, [currentDocument]);
+  };
+
+  // Compute which sections fit on which page using a greedy algorithm.
+  // Each page has A4_PAGE_HEIGHT pixels of usable space (minus top/bottom padding).
+  const sections = currentDocument?.sections ?? [];
+  const sectionIndexById = new Map(sections.map((s, i) => [s.id, i] as const));
+  const usableHeight = A4_PAGE_HEIGHT - PAGE_PADDING * 2;
+  const pages: Section[][] = [];
+  {
+    let current: Section[] = [];
+    let used = 0;
+    for (const sec of sections) {
+      const h = heights[sec.id] ?? 0;
+      // If a section doesn't fit on the current page, push it to the next page.
+      // Always put at least one section on a page (so a single huge section
+      // doesn't loop forever — it'll just overflow visually).
+      if (current.length > 0 && used + h > usableHeight) {
+        pages.push(current);
+        current = [sec];
+        used = h;
+      } else {
+        current.push(sec);
+        used += h;
+      }
+    }
+    if (current.length) pages.push(current);
+  }
+  if (pages.length === 0) pages.push([]);
+  const numPages = pages.length;
+  const totalPagesHeight = numPages * A4_PAGE_HEIGHT + (numPages - 1) * PAGE_GAP;
 
   if (!currentDocument) {
     return (
@@ -170,9 +215,6 @@ export const DocumentEditor: React.FC = () => {
       </div>
     );
   }
-
-  // Total height of all pages stacked with gaps
-  const totalPagesHeight = numPages * A4_PAGE_HEIGHT + (numPages - 1) * PAGE_GAP;
 
   return (
     <div className="flex-1 flex flex-col h-full bg-[#0a0f1d] overflow-hidden select-none">
@@ -230,7 +272,8 @@ export const DocumentEditor: React.FC = () => {
 
       {/* Editor viewport wrapper */}
       <div className="flex-1 overflow-y-auto py-10 flex justify-center bg-[#070b13]" onDragOver={(e) => e.preventDefault()}>
-        {/* Outer zoom wrapper */}
+        {/* Outer zoom wrapper — its width/height match the stacked pages so
+            the zoom transform doesn't crop content. */}
         <div
           style={{
             transform: `scale(${zoom})`,
@@ -244,61 +287,53 @@ export const DocumentEditor: React.FC = () => {
           className="select-text"
           onDragOver={(e) => e.preventDefault()}
         >
-          {/* Stacked A4 page backgrounds */}
-          {Array.from({ length: numPages }, (_, i) => (
+          {/* One A4 page per entry in `pages`. Each page is a self-contained
+              container with its own white background and padding, so sections
+              never visually cross a page boundary. */}
+          {pages.map((pageSections, pageIdx) => (
             <div
-              key={i}
+              key={pageIdx}
               className="absolute bg-white shadow-2xl rounded-sm border border-slate-200/80 no-print-page-chrome"
               style={{
-                top: i * (A4_PAGE_HEIGHT + PAGE_GAP),
+                top: pageIdx * (A4_PAGE_HEIGHT + PAGE_GAP),
                 left: 0,
                 width: A4_PAGE_WIDTH,
                 height: A4_PAGE_HEIGHT,
-                zIndex: 0,
+                padding: `${PAGE_PADDING}px`,
+                overflow: 'hidden',
               }}
-            />
-          ))}
-
-          {/* Page number labels removed — pages are flush now, no gap to label */}
-
-          {/* Content flow — sits on top of page backgrounds */}
-          <div
-            ref={contentRef}
-            className="absolute left-0 right-0"
-            style={{
-              top: 0,
-              zIndex: 1,
-              padding: `${PAGE_PADDING}px`,
-              minHeight: A4_PAGE_HEIGHT,
-            }}
-            onDragOver={(e) => e.preventDefault()}
-            onClick={() => setActiveSectionId(null)}
-          >
-            <div className="space-y-1">
-              {currentDocument.sections.map((sec, idx) => (
-                <SectionWrapper
-                  key={sec.id}
-                  section={sec}
-                  index={idx}
-                  isActive={activeSectionId === sec.id}
-                  onSelect={() => setActiveSectionId(sec.id)}
-                >
-                  <SectionEditor
-                    section={sec}
-                    tokens={currentDocument.styleProfile.tokens}
-                  />
-                </SectionWrapper>
-              ))}
-            </div>
-
-            {/* Empty page state helper */}
-            {currentDocument.sections.length === 0 && (
-              <div className="h-[400px] flex flex-col items-center justify-center border-2 border-dashed border-slate-300 rounded-lg text-slate-400">
-                <p className="text-sm font-medium">This document is empty.</p>
-                <p className="text-xs text-slate-500 mt-1">Hover over the page or use the AI to insert sections.</p>
+              onClick={() => setActiveSectionId(null)}
+            >
+              <div className="space-y-1">
+                {pageSections.map((sec) => {
+                  const idx = sectionIndexById.get(sec.id) ?? 0;
+                  return (
+                    <div key={sec.id} ref={handleSectionMount(sec.id)}>
+                      <SectionWrapper
+                        section={sec}
+                        index={idx}
+                        isActive={activeSectionId === sec.id}
+                        onSelect={() => setActiveSectionId(sec.id)}
+                      >
+                        <SectionEditor
+                          section={sec}
+                          tokens={currentDocument.styleProfile.tokens}
+                        />
+                      </SectionWrapper>
+                    </div>
+                  );
+                })}
               </div>
-            )}
-          </div>
+
+              {/* Empty page state helper */}
+              {pageSections.length === 0 && currentDocument.sections.length === 0 && (
+                <div className="h-[400px] flex flex-col items-center justify-center border-2 border-dashed border-slate-300 rounded-lg text-slate-400">
+                  <p className="text-sm font-medium">This document is empty.</p>
+                  <p className="text-xs text-slate-500 mt-1">Hover over the page or use the AI to insert sections.</p>
+                </div>
+              )}
+            </div>
+          ))}
         </div>
       </div>
     </div>
