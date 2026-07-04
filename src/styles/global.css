@@ -191,6 +191,22 @@ body {
     position: static !important;
   }
 
+  /* Each per-page container is absolutely positioned on screen. In print,
+     unstack them so the browser paginates the flowing content naturally. */
+  .no-print-page-chrome {
+    position: static !important;
+    width: 100% !important;
+    height: auto !important;
+    min-height: 0 !important;
+    padding: 0 !important;
+    margin: 0 0 16mm 0 !important;
+    background: transparent !important;
+    border: none !important;
+    box-shadow: none !important;
+    border-radius: 0 !important;
+    overflow: visible !important;
+  }
+
   /* Section cards: clean flow, no hover chrome, no drag styles */
   .group.relative {
     margin: 0 !important;
