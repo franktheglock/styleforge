@@ -468,11 +468,13 @@ pub async fn stream_ai_operations(
     // 2. Fallback: try extracting tool calls from the accumulated text
     //    Some models output <tool_call> tags or JSON operations in the content
     if !ops_applied && !full_text.is_empty() {
-        if let Some(ops) = try_extract_tool_calls_from_text(&full_text) {
-            if !ops.is_empty() {
-                apply_operations(&mut doc, &ops)?;
-                doc.metadata.updated_at = chrono_now();
-                ops_applied = true;
+        if let Ok(json_array) = extract_json_array(&full_text) {
+            if let Ok(ops) = serde_json::from_str::<Vec<AICommandOperation>>(&json_array) {
+                if !ops.is_empty() {
+                    apply_operations(&mut doc, &ops)?;
+                    doc.metadata.updated_at = chrono_now();
+                    ops_applied = true;
+                }
             }
         }
     }
