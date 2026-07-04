@@ -177,6 +177,9 @@ export const DocumentEditor: React.FC = () => {
 
   // Compute which sections fit on which page using a greedy algorithm.
   // Each page has A4_PAGE_HEIGHT pixels of usable space (minus top/bottom padding).
+  // A section that is itself taller than a page is allowed to overflow the
+  // current page rather than being pushed — that way tall sections render
+  // across the page boundary instead of being moved wholesale to page 2.
   const sections = currentDocument?.sections ?? [];
   const sectionIndexById = new Map(sections.map((s, i) => [s.id, i] as const));
   const usableHeight = A4_PAGE_HEIGHT - PAGE_PADDING * 2;
@@ -186,10 +189,11 @@ export const DocumentEditor: React.FC = () => {
     let used = 0;
     for (const sec of sections) {
       const h = heights[sec.id] ?? 0;
-      // If a section doesn't fit on the current page, push it to the next page.
-      // Always put at least one section on a page (so a single huge section
-      // doesn't loop forever — it'll just overflow visually).
-      if (current.length > 0 && used + h > usableHeight) {
+      const tooTallForAnyPage = h > usableHeight;
+      // Push to a new page only when (a) the current page has at least one
+      // section already and (b) adding this one would overflow and (c) this
+      // section is small enough that it could fit on a fresh page.
+      if (current.length > 0 && used + h > usableHeight && !tooTallForAnyPage) {
         pages.push(current);
         current = [sec];
         used = h;
