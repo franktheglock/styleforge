@@ -78,7 +78,7 @@ export const Header: React.FC = () => {
           id: `sec_local_${Date.now()}_1`,
           type: 'heading' as const,
           styleToken: 'heading',
-          content: { type: 'heading', attrs: { level: 1 }, content: [{ type: 'text', text: 'the test doccument' }] }
+          content: { type: 'paragraph', content: [{ type: 'text', text: 'the test doccument' }] }
         },
         {
           id: `sec_local_${Date.now()}_2`,

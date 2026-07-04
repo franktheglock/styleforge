@@ -283,7 +283,7 @@ export const useDocumentStore = create<DocumentState>((set, get) => ({
 
     if (sectionType === 'heading') {
       styleToken = 'heading';
-      defaultContent = { type: 'heading', attrs: { level: 1 }, content: [{ type: 'text', text: 'New Heading' }] };
+      defaultContent = { type: 'paragraph', content: [{ type: 'text', text: 'New Heading' }] };
     } else if (sectionType === 'divider') {
       styleToken = 'divider';
       defaultContent = { type: 'horizontalRule' };
