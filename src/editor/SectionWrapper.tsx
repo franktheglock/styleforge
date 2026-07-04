@@ -94,6 +94,15 @@ export const SectionWrapper: React.FC<SectionWrapperProps> = ({
       `}
       style={{}}
     >
+      {/* Invisible hover bridge: extends the section's hover area into the
+          gap between the section and the toolbar, so the toolbar doesn't
+          vanish when the user moves the cursor toward it. */}
+      <div
+        className="absolute top-0 bottom-0"
+        style={{ left: 'calc(-1 * 40px)', width: '40px' }}
+        aria-hidden
+      />
+
       {/* Side Action panel — hidden by default, appears on hover. Positioned
           just outside the page padding so it sits in the empty area beside
           the A4 sheet. */}
