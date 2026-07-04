@@ -400,10 +400,17 @@ pub async fn stream_ai_operations(
                 if let Some(choices) = json.get("choices").and_then(|c| c.as_array()) {
                     if let Some(choice) = choices.first() {
                         if let Some(delta) = choice.get("delta") {
-                            // Text content
-                            if let Some(content) = delta.get("content").and_then(|c| c.as_str()) {
-                                full_text.push_str(content);
-                                app_handle.emit("ai-stream:token", &content).map_err(|e| format!("Emit error: {}", e))?;
+                            // Text content: try multiple field names since some
+                            // providers put it in different places
+                            let content_str: Option<&str> = delta.get("content")
+                                .and_then(|c| c.as_str())
+                                .or_else(|| delta.get("text").and_then(|t| t.as_str()))
+                                .or_else(|| delta.get("reasoning_content").and_then(|r| r.as_str()));
+                            if let Some(content) = content_str {
+                                if !content.is_empty() {
+                                    full_text.push_str(content);
+                                    let _ = app_handle.emit("ai-stream:token", content);
+                                }
                             }
                             // Tool call chunks in streaming delta
                             if let Some(tc) = delta.get("tool_calls").and_then(|t| t.as_array()) {
@@ -413,15 +420,24 @@ pub async fn stream_ai_operations(
                                         if let Some(id) = call.get("id").and_then(|i| i.as_str()) {
                                             if entry.0.is_none() { entry.0 = Some(id.to_string()); }
                                         }
-                            if let Some(args) = call.get("function").and_then(|f| f.get("arguments")) {
-                                match args {
-                                    serde_json::Value::String(s) => entry.1.push_str(s),
-                                    v => entry.1.push_str(&v.to_string()),
-                                }
-                            }
+                                        if let Some(args) = call.get("function").and_then(|f| f.get("arguments")) {
+                                            match args {
+                                                serde_json::Value::String(s) => entry.1.push_str(s),
+                                                v => entry.1.push_str(&v.to_string()),
+                                            }
+                                        }
                                     }
                                 }
                                 has_tool_calls = true;
+                            }
+                        }
+                        // Also check the choice-level content/message (fallback)
+                        if let Some(msg) = choice.get("message") {
+                            if let Some(content) = msg.get("content").and_then(|c| c.as_str()) {
+                                if !content.is_empty() && full_text.is_empty() {
+                                    full_text.push_str(content);
+                                    let _ = app_handle.emit("ai-stream:token", content);
+                                }
                             }
                         }
                         // finish_reason == "tool_calls" also indicates tool calls
