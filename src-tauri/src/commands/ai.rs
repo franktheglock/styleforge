@@ -479,11 +479,7 @@ pub async fn stream_ai_operations(
         }
     }
 
-    let assistant_message = if full_text.is_empty() {
-        "I have updated the document structure according to your request.".to_string()
-    } else {
-        full_text
-    };
+    let assistant_message = full_text;
 
     Ok(AIResponsePayload {
         document: doc,
