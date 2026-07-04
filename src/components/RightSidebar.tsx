@@ -22,6 +22,24 @@ export const RightSidebar: React.FC = () => {
   const [hexInput, setHexInput] = useState('');
   const [editScope, setEditScope] = useState<EditScope>('section');
 
+  // If the active section changes (or the token is no longer shared), reset
+  // scope to the safe default. Must be declared before any early return so
+  // the hook order stays stable across renders.
+  React.useEffect(() => {
+    if (!currentDocument) {
+      setEditScope('section');
+      return;
+    }
+    const activeSection = activeSectionId
+      ? currentDocument.sections.find(s => s.id === activeSectionId)
+      : null;
+    const sharedCount = activeTokenKey
+      ? currentDocument.sections.filter(s => s.styleToken === activeTokenKey).length
+      : 0;
+    const showScopeToggle = !!activeSection && sharedCount > 1;
+    if (!showScopeToggle) setEditScope('section');
+  }, [currentDocument, activeSectionId, activeTokenKey]);
+
   if (!currentDocument) return null;
 
   const tokens = currentDocument.styleProfile.tokens;
@@ -39,12 +57,6 @@ export const RightSidebar: React.FC = () => {
     ? currentDocument.sections.filter(s => s.styleToken === activeTokenKey).length
     : 0;
   const showScopeToggle = !!activeSection && sectionsUsingActiveToken > 1;
-
-  // If the active section changes (or the token is no longer shared), reset
-  // scope to the safe default.
-  React.useEffect(() => {
-    if (!showScopeToggle) setEditScope('section');
-  }, [activeSectionId, activeTokenKey, showScopeToggle]);
 
   const handleUpdateProp = (key: keyof StyleProperties, value: any) => {
     if (activeSectionId && editScope === 'section') {

@@ -8,7 +8,7 @@ import { TableRow } from '@tiptap/extension-table-row';
 import { TableCell } from '@tiptap/extension-table-cell';
 import { TableHeader } from '@tiptap/extension-table-header';
 import { Section, StyleProperties } from '../types';
-import { ZoomIn, ZoomOut, Maximize2, FileText, Plus, Type, AlignLeft, List, Minus, Table as TableIcon } from 'lucide-react';
+import { ZoomIn, ZoomOut, Maximize2, FileText, Type, AlignLeft, List, Minus, Table as TableIcon } from 'lucide-react';
 
 // Inline style builder matching the style token system
 export const resolveStyle = (tokenKey: string, tokens: Record<string, StyleProperties>): StyleProperties => {
@@ -135,7 +135,6 @@ const PAGE_GAP = 28;
 
 export const DocumentEditor: React.FC = () => {
   const { currentDocument, activeSectionId, setActiveSectionId, addSection } = useDocumentStore();
-  const [showAddMenu, setShowAddMenu] = useState(false);
   const [zoom, setZoom] = useState(1.0);
   const [numPages, setNumPages] = useState(1);
   const contentRef = useRef<HTMLDivElement>(null);
@@ -185,41 +184,25 @@ export const DocumentEditor: React.FC = () => {
             {currentDocument.styleProfile.name}
           </span>
 
-          {/* Add Section button + dropdown */}
-          <div className="relative ml-2">
-            <button
-              onClick={() => setShowAddMenu((s) => !s)}
-              className="flex items-center gap-1.5 px-2.5 py-1 rounded bg-indigo-500/20 hover:bg-indigo-500/30 text-indigo-300 text-xs font-medium transition-colors"
-              title="Add a new section"
-            >
-              <Plus size={14} /> Add Section
-            </button>
-            {showAddMenu && (
-              <>
-                <div className="fixed inset-0 z-40" onClick={() => setShowAddMenu(false)} />
-                <div className="absolute left-0 top-full mt-1 z-50 w-48 bg-[#1a1f2c] border border-slate-700 rounded shadow-xl py-1 text-sm">
-                  {[
-                    { type: 'heading' as const, label: 'Heading', icon: Type },
-                    { type: 'paragraph' as const, label: 'Paragraph', icon: AlignLeft },
-                    { type: 'list' as const, label: 'Bullet List', icon: List },
-                    { type: 'divider' as const, label: 'Divider', icon: Minus },
-                    { type: 'table' as const, label: 'Table', icon: TableIcon },
-                  ].map(({ type, label, icon: Icon }) => (
-                    <button
-                      key={type}
-                      onClick={() => {
-                        addSection(type);
-                        setShowAddMenu(false);
-                      }}
-                      className="w-full flex items-center gap-2 px-3 py-1.5 text-left text-slate-200 hover:bg-slate-800 transition-colors"
-                    >
-                      <Icon size={14} className="text-slate-400" />
-                      {label}
-                    </button>
-                  ))}
-                </div>
-              </>
-            )}
+          {/* Add Section — one-click inline buttons */}
+          <div className="ml-2 flex items-center gap-1 border-l border-slate-800 pl-3">
+            {[
+              { type: 'heading' as const, label: 'Heading', icon: Type },
+              { type: 'paragraph' as const, label: 'Paragraph', icon: AlignLeft },
+              { type: 'list' as const, label: 'List', icon: List },
+              { type: 'divider' as const, label: 'Divider', icon: Minus },
+              { type: 'table' as const, label: 'Table', icon: TableIcon },
+            ].map(({ type, label, icon: Icon }) => (
+              <button
+                key={type}
+                onClick={() => addSection(type)}
+                title={`Add ${label}`}
+                className="flex items-center gap-1.5 px-2 py-1 rounded text-[10px] font-medium bg-indigo-500/10 hover:bg-indigo-500/25 text-indigo-300 transition-colors"
+              >
+                <Icon size={12} />
+                {label}
+              </button>
+            ))}
           </div>
         </div>
         
