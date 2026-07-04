@@ -9,10 +9,14 @@ pub mod operations;
 
 use serde::{Deserialize, Serialize};
 
-#[derive(Debug, Deserialize, Serialize, Clone)]
+#[derive(Debug, Default, Deserialize, Serialize, Clone)]
 pub struct ChatMessage {
-    pub role: String, // "user", "assistant", "system"
+    pub role: String, // "user", "assistant", "system", "tool"
     pub content: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub tool_call_id: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub name: Option<String>, // tool name for tool role
 }
 
 #[derive(Debug, Deserialize, Serialize, Clone)]

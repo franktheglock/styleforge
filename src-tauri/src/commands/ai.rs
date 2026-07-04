@@ -174,6 +174,7 @@ pub async fn run_ai_operations(
         ChatMessage {
             role: "system".to_string(),
             content: system_prompt.clone(),
+            ..Default::default()
         },
     ];
     full_messages.extend(messages);
@@ -225,10 +226,12 @@ pub async fn run_ai_operations(
                 "You executed the following operations. Tell the user what you did conversationally:\n{}",
                 parsed_ops.iter().map(|o| format!("- {:?}", o)).collect::<Vec<_>>().join("\n")
             ),
+            ..Default::default()
         };
         full_messages.push(ChatMessage {
             role: "assistant".to_string(),
             content: "[tool calls executed]".to_string(),
+            ..Default::default()
         });
         full_messages.push(system_note);
 
@@ -326,142 +329,187 @@ pub async fn stream_ai_operations(
         }
     }]);
 
-    let mut full_messages = vec![
-        ChatMessage { role: "system".to_string(), content: system_prompt },
-    ];
-    full_messages.extend(messages.clone());
-
-    // Build the endpoint URL (same pattern as the providers use)
     let ep = config.endpoint.trim_end_matches('/');
     let url = match config.provider_type.as_str() {
         "Ollama" => format!("{}/api/chat", ep),
         _ => format!("{}/v1/chat/completions", ep),
     };
 
-    let body = serde_json::json!({
-        "model": config.model_name,
-        "messages": full_messages.clone(),
-        "stream": true,
-        "temperature": config.temperature,
-        "max_tokens": config.max_tokens,
-        "tools": tools,
-    });
+    // ── Multi-step tool-use loop ─────────────────────────────────────────
+    // Build the running conversation. Each round appends the model's
+    // assistant message and any tool result messages.
+    let mut convo: Vec<ChatMessage> = Vec::new();
+    convo.push(ChatMessage { role: "system".to_string(), content: system_prompt.clone(), ..Default::default() });
+    convo.extend(messages.clone());
 
-    let client = reqwest::Client::new();
-    let mut req = client.post(&url)
-        .header("Content-Type", "application/json");
-    if !config.api_key.is_empty() {
-        req = req.header("Authorization", format!("Bearer {}", config.api_key));
-    }
+    let mut final_text = String::new();
+    let max_rounds = 5;
 
-    let mut resp = req.json(&body).send().await.map_err(|e| format!("Stream request failed: {}", e))?;
-
-    if !resp.status().is_success() {
-        let status = resp.status();
-        let text = resp.text().await.unwrap_or_default();
-        return Err(format!("Stream API error {}: {}", status, text));
-    }
-
-    // Accumulate text content + tool call arguments across SSE chunks
-    let mut full_text = String::new();
-    let mut tool_call_buffers: std::collections::HashMap<usize, (Option<String>, String)> = std::collections::HashMap::new(); // index -> (id, args)
-    let mut has_tool_calls = false;
-
-    // Ollama uses a different SSE format than OpenAI-compatible APIs
-    if config.provider_type.as_str() == "Ollama" {
-        // Non-streaming fallback for Ollama
-        drop(resp);
-        let fallback = run_ai_operations(doc, messages, provider_id).await?;
-        app_handle.emit("ai-stream:done", &fallback.assistant_message).map_err(|e| e.to_string())?;
-        return Ok(fallback);
-    }
-
-    // OpenAI-compatible SSE streaming: accumulate chunks into a line buffer
-    // and parse each complete line as an SSE "data:" event.
-    let mut line_buf = String::new();
-    while let Some(chunk) = resp.chunk().await.map_err(|e| format!("Stream read error: {}", e))? {
-        line_buf.push_str(&String::from_utf8_lossy(&chunk));
-        // Process all complete lines in the buffer
-        loop {
-            let newline_idx = match line_buf.find('\n') {
-                Some(i) => i,
-                None => break, // wait for more data
+    for _round in 0..max_rounds {
+        // Ollama doesn't have reliable streaming tool-call support — use
+        // non-streaming and process the response in one shot.
+        if config.provider_type.as_str() == "Ollama" {
+            let req = ChatRequest {
+                messages: convo.clone(),
+                temperature: Some(config.temperature),
+                max_tokens: Some(config.max_tokens),
+                tools: Some(tools.clone()),
             };
-            let line = line_buf[..newline_idx].trim().to_string();
-            line_buf = line_buf[newline_idx + 1..].to_string();
-            if line.is_empty() || !line.starts_with("data: ") {
-                continue;
+            let resp = OllamaProvider.chat(&config, req).await?;
+            let _ = app_handle.emit("ai-stream:done", &String::new());
+
+            // Emit any content
+            if let Some(content) = &resp.content {
+                if !content.is_empty() {
+                    final_text.push_str(content);
+                    let _ = app_handle.emit("ai-stream:token", content);
+                }
             }
-            let data = &line[6..];
-            if data == "[DONE]" {
-                continue;
+
+            // Check for tool calls
+            if let Some(tcs) = &resp.tool_calls {
+                let (ops_applied, tool_results) = apply_tool_calls(
+                    &mut doc,
+                    tcs,
+                    &app_handle,
+                )?;
+                if !ops_applied && tool_results.is_empty() {
+                    // No tool calls processed; we're done
+                    break;
+                }
+                if !tool_results.is_empty() {
+                    // Add assistant's tool_calls to conversation
+                    convo.push(ChatMessage {
+                        role: "assistant".to_string(),
+                        content: resp.content.clone().unwrap_or_default(),
+                        ..Default::default()
+                    });
+                    // Add tool result messages
+                    for tr in tool_results {
+                        convo.push(ChatMessage {
+                            role: "tool".to_string(),
+                            content: tr.content,
+                            tool_call_id: Some(tr.tool_call_id),
+                            name: Some("edit_document_structure".to_string()),
+                            ..Default::default()
+                        });
+                    }
+                    continue;
+                }
             }
-            if let Ok(json) = serde_json::from_str::<serde_json::Value>(data) {
-                if let Some(choices) = json.get("choices").and_then(|c| c.as_array()) {
-                    if let Some(choice) = choices.first() {
-                        if let Some(delta) = choice.get("delta") {
-                            // Text content: try multiple field names since some
-                            // providers put it in different places
-                            let content_str: Option<&str> = delta.get("content")
-                                .and_then(|c| c.as_str())
-                                .or_else(|| delta.get("text").and_then(|t| t.as_str()))
-                                .or_else(|| delta.get("reasoning_content").and_then(|r| r.as_str()));
-                            if let Some(content) = content_str {
-                                if !content.is_empty() {
-                                    full_text.push_str(content);
-                                    let _ = app_handle.emit("ai-stream:token", content);
+            break;
+        }
+
+        // OpenAI-compatible streaming
+        let body = serde_json::json!({
+            "model": config.model_name,
+            "messages": convo.clone(),
+            "stream": true,
+            "temperature": config.temperature,
+            "max_tokens": config.max_tokens,
+            "tools": tools,
+        });
+
+        let client = reqwest::Client::new();
+        let mut req = client.post(&url)
+            .header("Content-Type", "application/json");
+        if !config.api_key.is_empty() {
+            req = req.header("Authorization", format!("Bearer {}", config.api_key));
+        }
+
+        let resp = match req.json(&body).send().await {
+            Ok(r) => r,
+            Err(e) => return Err(format!("Stream request failed: {}", e)),
+        };
+
+        if !resp.status().is_success() {
+            let status = resp.status();
+            let text = resp.text().await.unwrap_or_default();
+            return Err(format!("Stream API error {}: {}", status, text));
+        }
+
+        // Parse the streaming response: text content + tool call deltas
+        let mut round_text = String::new();
+        let mut tool_call_buffers: std::collections::HashMap<usize, (Option<String>, String)> = std::collections::HashMap::new();
+        let mut has_tool_calls = false;
+
+        let mut line_buf = String::new();
+        let mut stream_resp = resp;
+        while let Some(chunk) = stream_resp.chunk().await.map_err(|e| format!("Stream read error: {}", e))? {
+            line_buf.push_str(&String::from_utf8_lossy(&chunk));
+            loop {
+                let newline_idx = match line_buf.find('\n') {
+                    Some(i) => i,
+                    None => break,
+                };
+                let line = line_buf[..newline_idx].trim().to_string();
+                line_buf = line_buf[newline_idx + 1..].to_string();
+                if line.is_empty() || !line.starts_with("data: ") {
+                    continue;
+                }
+                let data = &line[6..];
+                if data == "[DONE]" {
+                    continue;
+                }
+                if let Ok(json) = serde_json::from_str::<serde_json::Value>(data) {
+                    if let Some(choices) = json.get("choices").and_then(|c| c.as_array()) {
+                        if let Some(choice) = choices.first() {
+                            if let Some(delta) = choice.get("delta") {
+                                // Text content from multiple possible fields
+                                let content_str: Option<String> = delta.get("content")
+                                    .and_then(|c| c.as_str())
+                                    .or_else(|| delta.get("text").and_then(|t| t.as_str()))
+                                    .map(|s| s.to_string())
+                                    .or_else(|| delta.get("reasoning_content").and_then(|r| r.as_str()).map(|s| s.to_string()));
+                                if let Some(content) = content_str {
+                                    if !content.is_empty() {
+                                        round_text.push_str(&content);
+                                        let _ = app_handle.emit("ai-stream:token", &content);
+                                    }
                                 }
-                            }
-                            // Tool call chunks in streaming delta
-                            if let Some(tc) = delta.get("tool_calls").and_then(|t| t.as_array()) {
-                                for call in tc {
-                                    if let Some(idx) = call.get("index").and_then(|i| i.as_i64()).map(|i| i as usize) {
-                                        let entry = tool_call_buffers.entry(idx).or_insert((None, String::new()));
-                                        if let Some(id) = call.get("id").and_then(|i| i.as_str()) {
-                                            if entry.0.is_none() { entry.0 = Some(id.to_string()); }
-                                        }
-                                        if let Some(args) = call.get("function").and_then(|f| f.get("arguments")) {
-                                            match args {
-                                                serde_json::Value::String(s) => entry.1.push_str(s),
-                                                v => entry.1.push_str(&v.to_string()),
+                                // Tool call chunks
+                                if let Some(tc) = delta.get("tool_calls").and_then(|t| t.as_array()) {
+                                    for call in tc {
+                                        if let Some(idx) = call.get("index").and_then(|i| i.as_i64()).map(|i| i as usize) {
+                                            let entry = tool_call_buffers.entry(idx).or_insert((None, String::new()));
+                                            if let Some(id) = call.get("id").and_then(|i| i.as_str()) {
+                                                if entry.0.is_none() { entry.0 = Some(id.to_string()); }
+                                            }
+                                            if let Some(args) = call.get("function").and_then(|f| f.get("arguments")) {
+                                                match args {
+                                                    serde_json::Value::String(s) => entry.1.push_str(s),
+                                                    v => entry.1.push_str(&v.to_string()),
+                                                }
                                             }
                                         }
                                     }
-                                }
-                                has_tool_calls = true;
-                            }
-                        }
-                        // Also check the choice-level content/message (fallback)
-                        if let Some(msg) = choice.get("message") {
-                            if let Some(content) = msg.get("content").and_then(|c| c.as_str()) {
-                                if !content.is_empty() && full_text.is_empty() {
-                                    full_text.push_str(content);
-                                    let _ = app_handle.emit("ai-stream:token", content);
+                                    has_tool_calls = true;
                                 }
                             }
-                        }
-                        // finish_reason == "tool_calls" also indicates tool calls
-                        if let Some(finish) = choice.get("finish_reason").and_then(|f| f.as_str()) {
-                            if finish == "tool_calls" {
-                                has_tool_calls = true;
+                            // finish_reason check
+                            if let Some(finish) = choice.get("finish_reason").and_then(|f| f.as_str()) {
+                                if finish == "tool_calls" {
+                                    has_tool_calls = true;
+                                }
                             }
                         }
                     }
                 }
             }
         }
-    }
+        drop(stream_resp);
 
-    // Notify frontend that streaming is done
-    app_handle.emit("ai-stream:done", "").map_err(|e| e.to_string())?;
+        final_text.push_str(&round_text);
 
-    // ── Process tool calls ──────────────────────────────────────────────
-    // 1. Try reconstructing from streamed delta.tool_calls chunks
-    let mut ops_applied = false;
-    if has_tool_calls && !tool_call_buffers.is_empty() {
-        let reconstructed: Vec<serde_json::Value> = tool_call_buffers.into_iter().map(|(_, (id, args))| {
+        // If no tool calls, we're done with this round
+        if !has_tool_calls || tool_call_buffers.is_empty() {
+            break;
+        }
+
+        // Reconstruct tool calls and apply them
+        let reconstructed: Vec<serde_json::Value> = tool_call_buffers.iter().map(|(_, (id, args))| {
             serde_json::json!({
-                "id": id.unwrap_or_default(),
+                "id": id.clone().unwrap_or_default(),
                 "type": "function",
                 "function": {
                     "name": "edit_document_structure",
@@ -471,78 +519,194 @@ pub async fn stream_ai_operations(
         }).collect();
 
         let tc_val = serde_json::Value::Array(reconstructed);
-        match parse_operations_from_tool_calls(&tc_val) {
-            Ok(ops) if !ops.is_empty() => {
-                apply_operations(&mut doc, &ops)?;
-                doc.metadata.updated_at = chrono_now();
-                ops_applied = true;
-            }
-            _ => {}
-        }
-    }
+        let (ops_applied, tool_results) = apply_tool_calls_from_value(
+            &mut doc,
+            &tc_val,
+            &app_handle,
+        )?;
 
-    // 2. Fallback: try extracting tool calls from the accumulated text
-    //    Some models output <tool_call> tags or JSON operations in the content
-    if !ops_applied && !full_text.is_empty() {
-        if let Ok(json_array) = extract_json_array(&full_text) {
-            if let Ok(ops) = serde_json::from_str::<Vec<AICommandOperation>>(&json_array) {
-                if !ops.is_empty() {
-                    apply_operations(&mut doc, &ops)?;
-                    doc.metadata.updated_at = chrono_now();
-                    ops_applied = true;
-                }
-            }
+        if tool_results.is_empty() && !ops_applied {
+            // Couldn't process tool calls — fall back to non-streaming
+            let fallback = run_ai_operations(doc, convo.iter().skip(1).cloned().collect(), provider_id).await?;
+            return Ok(fallback);
         }
-    }
 
-    // If we applied tool calls but the model didn't send a final text response,
-    // do a second round so the reasoning model can produce its final answer
-    // after seeing the tool result.
-    let mut final_text = full_text.clone();
-    if ops_applied && final_text.is_empty() {
-        let tool_summary: Vec<String> = Vec::new(); // we don't re-derive here; just notify
-        let mut second_messages = vec![
-            ChatMessage {
-                role: "system".to_string(),
-                content: build_system_prompt(&doc),
-            },
-        ];
-        for m in &messages {
-            second_messages.push(m.clone());
-        }
-        // Tell the model the tool call completed and ask for its final answer
-        second_messages.push(ChatMessage {
+        // Add assistant message (its tool calls) to conversation
+        convo.push(ChatMessage {
             role: "assistant".to_string(),
-            content: "[Tool call executed. Document updated.]".to_string(),
-        });
-        second_messages.push(ChatMessage {
-            role: "user".to_string(),
-            content: "Now respond conversationally about what you did.".to_string(),
+            content: round_text.clone(),
+            ..Default::default()
         });
 
-        let second_req = ChatRequest {
-            messages: second_messages,
-            temperature: Some(config.temperature),
-            max_tokens: Some(512),
-            tools: None,
-        };
+        // Add tool result messages
+        for tr in tool_results {
+            convo.push(ChatMessage {
+                role: "tool".to_string(),
+                content: tr.content,
+                tool_call_id: Some(tr.tool_call_id),
+                name: Some("edit_document_structure".to_string()),
+                ..Default::default()
+            });
+        }
 
-        let second_resp = match config.provider_type.as_str() {
-            "Ollama" => OllamaProvider.chat(&config, second_req).await?,
-            "LMStudio" => LMStudioProvider.chat(&config, second_req).await?,
-            "LlamaCpp" => LlamaCppProvider.chat(&config, second_req).await?,
-            "OpenRouter" => OpenRouterProvider.chat(&config, second_req).await?,
-            "NvidiaNim" => NvidiaNimProvider.chat(&config, second_req).await?,
-            _ => return Err(format!("Unsupported provider type: {}", config.provider_type)),
-        };
-
-        final_text = second_resp.content.clone().unwrap_or_default();
+        // Update document metadata
+        doc.metadata.updated_at = chrono_now();
     }
+
+    // Notify frontend that streaming is done
+    let _ = app_handle.emit("ai-stream:done", &final_text);
 
     Ok(AIResponsePayload {
         document: doc,
         assistant_message: final_text,
     })
+}
+
+struct ToolResult {
+    tool_call_id: String,
+    content: String,
+}
+
+fn apply_tool_calls(
+    doc: &mut DocumentModel,
+    tool_calls: &serde_json::Value,
+    app_handle: &tauri::AppHandle,
+) -> Result<(bool, Vec<ToolResult>), String> {
+    let mut results = Vec::new();
+    let mut ops_applied = false;
+
+    if let Some(arr) = tool_calls.as_array() {
+        for call in arr {
+            let id = call.get("id").and_then(|v| v.as_str()).unwrap_or("").to_string();
+            let func_name = call.get("function").and_then(|f| f.get("name")).and_then(|n| n.as_str()).unwrap_or("");
+            if func_name != "edit_document_structure" {
+                continue;
+            }
+            // Arguments can be a string or an object
+            let ops_result = if let Some(args_str) = call.get("function").and_then(|f| f.get("arguments")).and_then(|a| a.as_str()) {
+                parse_operations_from_args(args_str)
+            } else if let Some(args_obj) = call.get("function").and_then(|f| f.get("arguments")).and_then(|a| a.as_object()) {
+                serde_json::from_value::<Vec<AICommandOperation>>(serde_json::Value::Array(
+                    args_obj.get("operations")
+                        .and_then(|o| o.as_array())
+                        .cloned()
+                        .unwrap_or_default()
+                )).map_err(|e| format!("Failed to parse operations: {}", e))
+            } else {
+                Err("Tool call has no arguments".to_string())
+            };
+
+            match ops_result {
+                Ok(ops) if !ops.is_empty() => {
+                    if let Err(e) = apply_operations(doc, &ops) {
+                        let _ = app_handle.emit("ai-stream:done", &e);
+                        results.push(ToolResult {
+                            tool_call_id: id,
+                            content: format!("Error applying operations: {}", e),
+                        });
+                    } else {
+                        ops_applied = true;
+                        results.push(ToolResult {
+                            tool_call_id: id,
+                            content: format!("Successfully applied {} operations: {}",
+                                ops.len(),
+                                ops.iter().map(|o| format!("{:?}", o)).collect::<Vec<_>>().join(", ")
+                            ),
+                        });
+                    }
+                }
+                Ok(_) => {
+                    results.push(ToolResult {
+                        tool_call_id: id,
+                        content: "No operations to apply".to_string(),
+                    });
+                }
+                Err(e) => {
+                    results.push(ToolResult {
+                        tool_call_id: id,
+                        content: format!("Error parsing operations: {}", e),
+                    });
+                }
+            }
+        }
+    }
+
+    Ok((ops_applied, results))
+}
+
+fn apply_tool_calls_from_value(
+    doc: &mut DocumentModel,
+    tool_calls: &serde_json::Value,
+    app_handle: &tauri::AppHandle,
+) -> Result<(bool, Vec<ToolResult>), String> {
+    let mut results = Vec::new();
+    let mut ops_applied = false;
+
+    if let Some(arr) = tool_calls.as_array() {
+        for call in arr {
+            let id = call.get("id").and_then(|v| v.as_str()).unwrap_or("").to_string();
+            let func_name = call.get("function").and_then(|f| f.get("name")).and_then(|n| n.as_str()).unwrap_or("");
+            if func_name != "edit_document_structure" {
+                continue;
+            }
+
+            let args_str = call.get("function").and_then(|f| f.get("arguments")).and_then(|a| a.as_str());
+            let ops_result = if let Some(s) = args_str {
+                parse_operations_from_args(s)
+            } else if let Some(args_obj) = call.get("function").and_then(|f| f.get("arguments")).and_then(|a| a.as_object()) {
+                serde_json::from_value::<Vec<AICommandOperation>>(serde_json::Value::Array(
+                    args_obj.get("operations")
+                        .and_then(|o| o.as_array())
+                        .cloned()
+                        .unwrap_or_default()
+                )).map_err(|e| format!("Failed to parse operations: {}", e))
+            } else {
+                Err("Tool call has no arguments".to_string())
+            };
+
+            match ops_result {
+                Ok(ops) if !ops.is_empty() => {
+                    if let Err(e) = apply_operations(doc, &ops) {
+                        results.push(ToolResult {
+                            tool_call_id: id,
+                            content: format!("Error applying operations: {}", e),
+                        });
+                    } else {
+                        ops_applied = true;
+                        results.push(ToolResult {
+                            tool_call_id: id,
+                            content: format!("Applied {} operations successfully", ops.len()),
+                        });
+                    }
+                }
+                Ok(_) => {
+                    results.push(ToolResult {
+                        tool_call_id: id,
+                        content: "No operations to apply".to_string(),
+                    });
+                }
+                Err(e) => {
+                    results.push(ToolResult {
+                        tool_call_id: id,
+                        content: format!("Error: {}", e),
+                    });
+                }
+            }
+        }
+    }
+
+    Ok((ops_applied, results))
+}
+
+fn parse_operations_from_args(args_str: &str) -> Result<Vec<AICommandOperation>, String> {
+    let parsed: serde_json::Value = serde_json::from_str(args_str)
+        .map_err(|e| format!("Invalid tool arguments JSON: {}", e))?;
+    if let Some(ops) = parsed.get("operations") {
+        serde_json::from_value::<Vec<AICommandOperation>>(ops.clone())
+            .map_err(|e| format!("Failed to parse operations array: {}", e))
+    } else {
+        Ok(Vec::new())
+    }
 }
 
 fn parse_operations_from_tool_calls(tool_calls: &serde_json::Value) -> Result<Vec<AICommandOperation>, String> {
