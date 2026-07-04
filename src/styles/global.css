@@ -141,7 +141,9 @@ body {
     margin: 16mm;
   }
 
-  /* Hide all on-screen chrome */
+  /* Hide all on-screen chrome. NOTE: .no-print-page-chrome is intentionally
+     NOT hidden here — it's the per-page A4 container and we want its
+     content (sections) to flow in print. It's unstyled instead, below. */
   .no-print,
   header,
   .h-12,
@@ -150,9 +152,6 @@ body {
   .no-print-action,
   button,
   select,
-  /* The on-screen A4 page backgrounds and the "Page N" gap labels */
-  .no-print-page-chrome,
-  /* Anything absolutely positioned inside the zoom wrapper (page breaks) */
   .no-print {
     display: none !important;
   }
@@ -194,6 +193,7 @@ body {
   /* Each per-page container is absolutely positioned on screen. In print,
      unstack them so the browser paginates the flowing content naturally. */
   .no-print-page-chrome {
+    display: block !important;
     position: static !important;
     width: 100% !important;
     height: auto !important;
