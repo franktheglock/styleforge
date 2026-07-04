@@ -99,7 +99,7 @@ export const SectionWrapper: React.FC<SectionWrapperProps> = ({
           the A4 sheet. */}
       <div className={`absolute top-1/2 -translate-y-1/2 flex flex-col items-center gap-1.5 p-1 rounded-md bg-slate-950 border border-slate-800 shadow-lg transition-opacity duration-200 no-print z-10
         ${isHovered || isActive ? 'opacity-100' : 'opacity-0 pointer-events-none'}`}
-        style={{ left: `calc(-1 * 60px - 4px)` }}
+        style={{ left: `calc(-1 * 36px)` }}
       >
         <div
           onPointerDown={handleGripPointerDown}
