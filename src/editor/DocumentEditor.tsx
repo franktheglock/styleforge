@@ -131,7 +131,9 @@ const SectionEditor: React.FC<{ section: Section; tokens: Record<string, StylePr
 const A4_PAGE_HEIGHT = 1122; // A4 at 96dpi (297mm)
 const A4_PAGE_WIDTH = 794;   // A4 at 96dpi (210mm)
 const PAGE_PADDING = 60;
-const PAGE_GAP = 28;
+// On-screen pages stack flush with no visual gap so content never falls into
+// the space between pages. The "Page N" label still marks the breaks.
+const PAGE_GAP = 0;
 
 export const DocumentEditor: React.FC = () => {
   const { currentDocument, activeSectionId, setActiveSectionId, addSection } = useDocumentStore();
@@ -257,24 +259,7 @@ export const DocumentEditor: React.FC = () => {
             />
           ))}
 
-          {/* Page number labels between pages */}
-          {numPages > 1 && Array.from({ length: numPages - 1 }, (_, i) => (
-            <div
-              key={`break-${i}`}
-              className="absolute flex items-center justify-center no-print"
-              style={{
-                top: (i + 1) * A4_PAGE_HEIGHT + i * PAGE_GAP,
-                left: 0,
-                width: A4_PAGE_WIDTH,
-                height: PAGE_GAP,
-                zIndex: 2,
-              }}
-            >
-              <span className="text-[9px] font-mono text-slate-500 bg-[#070b13] px-2 py-0.5 rounded">
-                Page {i + 2}
-              </span>
-            </div>
-          ))}
+          {/* Page number labels removed — pages are flush now, no gap to label */}
 
           {/* Content flow — sits on top of page backgrounds */}
           <div
