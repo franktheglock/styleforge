@@ -76,12 +76,17 @@ export const FloatingAIBar: React.FC = () => {
       const payload = await payloadPromise;
       unlistenToken();
 
+      // Update the document store with the result
+      if (payload.document) {
+        useDocumentStore.setState({ currentDocument: payload.document });
+      }
+
       // Finalize with the full response
       setMessages((prev) => {
         const copy = [...prev];
         const last = copy[copy.length - 1];
         if (last && last.role === 'assistant') {
-          copy[copy.length - 1] = { role: 'assistant', content: payload.assistantMessage || accumulated };
+          copy[copy.length - 1] = { role: 'assistant', content: payload.assistantMessage || accumulated || 'Done!' };
         }
         return copy;
       });

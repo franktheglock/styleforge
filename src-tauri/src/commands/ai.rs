@@ -461,28 +461,20 @@ pub async fn stream_ai_operations(
                 doc.metadata.updated_at = chrono_now();
                 ops_applied = true;
             }
-            _ => {} // fall through to full-text fallback
+            _ => {}
         }
     }
 
     // 2. Fallback: try extracting tool calls from the accumulated text
-    if !ops_applied && has_tool_calls && !full_text.is_empty() {
-        if let Ok(json_array) = extract_json_array(&full_text) {
-            if let Ok(ops) = serde_json::from_str::<Vec<AICommandOperation>>(&json_array) {
-                if !ops.is_empty() {
-                    apply_operations(&mut doc, &ops)?;
-                    doc.metadata.updated_at = chrono_now();
-                    ops_applied = true;
-                }
+    //    Some models output <tool_call> tags or JSON operations in the content
+    if !ops_applied && !full_text.is_empty() {
+        if let Some(ops) = try_extract_tool_calls_from_text(&full_text) {
+            if !ops.is_empty() {
+                apply_operations(&mut doc, &ops)?;
+                doc.metadata.updated_at = chrono_now();
+                ops_applied = true;
             }
         }
-    }
-
-    // 3. Last resort: full non-streaming re-call
-    if has_tool_calls && !ops_applied {
-        let fallback = run_ai_operations(doc, messages, provider_id).await?;
-        app_handle.emit("ai-stream:done", &fallback.assistant_message).map_err(|e| e.to_string())?;
-        return Ok(fallback);
     }
 
     let assistant_message = if full_text.is_empty() {
