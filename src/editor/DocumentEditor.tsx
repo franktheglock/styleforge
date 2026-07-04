@@ -63,6 +63,8 @@ const SectionEditor: React.FC<{ section: Section; tokens: Record<string, StylePr
   const updateSectionContent = useDocumentStore((state) => state.updateSectionContent);
   const resolved = resolveStyle(section.styleToken, tokens);
   const styleObj = buildStyleObject(resolved);
+  // Guard against onUpdate/setContent ping-pong that can grow the doc.
+  const syncingRef = React.useRef(false);
 
   const editor = useEditor({
     extensions: [
@@ -85,14 +87,21 @@ const SectionEditor: React.FC<{ section: Section; tokens: Record<string, StylePr
       },
     },
     onUpdate: ({ editor }) => {
+      if (syncingRef.current) return;
       updateSectionContent(section.id, editor.getJSON());
     },
   });
 
   // Sync external changes (e.g., AI mutations)
   useEffect(() => {
-    if (editor && JSON.stringify(editor.getJSON()) !== JSON.stringify(section.content)) {
+    if (!editor) return;
+    if (JSON.stringify(editor.getJSON()) === JSON.stringify(section.content)) return;
+    syncingRef.current = true;
+    try {
       editor.commands.setContent(section.content, { emitUpdate: false });
+    } finally {
+      // Release on next tick so the synchronous setContent side effects have settled
+      setTimeout(() => { syncingRef.current = false; }, 0);
     }
   }, [section.content, editor]);
 

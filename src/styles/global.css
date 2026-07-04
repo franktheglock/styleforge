@@ -49,10 +49,7 @@ body {
 .ProseMirror p,
 .ProseMirror ul,
 .ProseMirror ol,
-.ProseMirror li,
-.ProseMirror table,
-.ProseMirror td,
-.ProseMirror th {
+.ProseMirror li {
   font-size: inherit;
   font-family: inherit;
   font-weight: inherit;
@@ -62,6 +59,68 @@ body {
   padding: 0;
   text-align: inherit;
   letter-spacing: inherit;
+}
+
+/* Tables: keep typography inheriting but add proper table layout.
+   The default ProseMirror .tableWrapper / table / td / th CSS is provided
+   by prosemirror-tables; we restate the essentials here so the table
+   renders correctly even without the upstream stylesheet. */
+.ProseMirror .tableWrapper {
+  overflow-x: auto;
+}
+.ProseMirror table {
+  border-collapse: collapse;
+  table-layout: fixed;
+  width: 100%;
+  overflow: hidden;
+  font-size: inherit;
+  font-family: inherit;
+  font-weight: inherit;
+  color: inherit;
+  line-height: inherit;
+  margin: 0;
+  text-align: inherit;
+  letter-spacing: inherit;
+}
+.ProseMirror td,
+.ProseMirror th {
+  vertical-align: top;
+  box-sizing: border-box;
+  position: relative;
+  font-size: inherit;
+  font-family: inherit;
+  font-weight: inherit;
+  color: inherit;
+  line-height: inherit;
+  min-width: 1em;
+  border: 1px solid #cbd5e1;
+  padding: 6px 8px;
+  text-align: inherit;
+  letter-spacing: inherit;
+}
+.ProseMirror th {
+  background: rgba(99, 102, 241, 0.08);
+  font-weight: 600;
+}
+.ProseMirror .column-resize-handle {
+  position: absolute;
+  right: -2px;
+  top: 0;
+  bottom: 0;
+  width: 4px;
+  background-color: rgba(99, 102, 241, 0.5);
+  pointer-events: none;
+}
+.ProseMirror.resize-cursor {
+  cursor: ew-resize;
+}
+.ProseMirror .selectedCell:after {
+  z-index: 2;
+  position: absolute;
+  content: '';
+  left: 0; right: 0; top: 0; bottom: 0;
+  background: rgba(99, 102, 241, 0.18);
+  pointer-events: none;
 }
 
 /* Keep focus outline transparent */
