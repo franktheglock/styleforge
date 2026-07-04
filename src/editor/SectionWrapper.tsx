@@ -2,7 +2,7 @@ import React, { useState } from 'react';
 import { useDocumentStore } from '../store/documentStore';
 import { Section } from '../types';
 import { Trash2, Copy, GripVertical, Plus } from 'lucide-react';
-import { startDrag, getDragPayload, clearDragPayload } from './dragState';
+import { startPointerDrag } from './pointerDrag';
 
 interface SectionWrapperProps {
   section: Section;
@@ -25,83 +25,31 @@ export const SectionWrapper: React.FC<SectionWrapperProps> = ({
     deleteSection, 
     addSection,
     pushToHistory,
-    updateSectionStyleToken
   } = useDocumentStore();
   
   const [isHovered, setIsHovered] = useState(false);
-  const [isDragging, setIsDragging] = useState(false);
-  const [isDragOver, setIsDragOver] = useState(false);
 
-  // ─── Grip handle drag (section reorder) ───────────────────────────────────
-  const handleGripDragStart = (e: React.DragEvent) => {
+  const handleGripPointerDown = (e: React.PointerEvent) => {
+    if (e.button !== 0) return;
+    e.preventDefault();
+    e.stopPropagation();
+    const target = e.currentTarget as HTMLElement;
     const payload = `reorder:${index}`;
-    console.log('[SECTION] grip dragstart', { index, payload });
-    // Set payload immediately (no re-renders yet)
-    startDrag(payload); // deferred RAF inside — drag starts cleanly
-    e.dataTransfer.effectAllowed = 'move';
-    try { e.dataTransfer.setData('text/plain', payload); } catch (_) {}
-    // Defer local state too so no re-render happens during dragstart
-    setTimeout(() => setIsDragging(true), 0);
-  };
-
-  const handleGripDragEnd = () => {
-    clearDragPayload();
-    setIsDragging(false);
-    setIsDragOver(false);
-  };
-
-  // ─── Drop zone ────────────────────────────────────────────────────────────
-  const handleDragOver = (e: React.DragEvent) => {
-    e.preventDefault();
-    e.stopPropagation();
-    if (!isDragOver) {
-      console.log('[SECTION] dragover', { sectionId: section.id, target: (e.target as HTMLElement)?.className });
-    }
-    setIsDragOver(true);
-  };
-
-  const handleDragLeave = (e: React.DragEvent) => {
-    if (!e.currentTarget.contains(e.relatedTarget as Node)) {
-      console.log('[SECTION] dragleave', { sectionId: section.id });
-      setIsDragOver(false);
-    }
-  };
-
-  const handleDrop = (e: React.DragEvent) => {
-    e.preventDefault();
-    e.stopPropagation();
-    console.log('[SECTION] drop', { sectionId: section.id, target: (e.target as HTMLElement)?.className });
-    setIsDragOver(false);
-    if (!currentDocument) {
-      console.warn('[SECTION] drop - no currentDocument');
-      return;
-    }
-
-    // Use module-level payload first (most reliable in WebView2)
-    const payload = getDragPayload() || e.dataTransfer.getData('text/plain') || '';
-    console.log('[SECTION] drop payload', { payload });
-    clearDragPayload();
-
-    if (payload.startsWith('token:')) {
-      const tokenKey = payload.slice('token:'.length);
-      console.log('[SECTION] applying token', { sectionId: section.id, tokenKey });
-      updateSectionStyleToken(section.id, tokenKey);
-    } else if (payload.startsWith('reorder:')) {
-      const dragIndex = parseInt(payload.slice('reorder:'.length), 10);
-      if (!isNaN(dragIndex) && dragIndex !== index) {
-        console.log('[SECTION] reordering', { from: dragIndex, to: index });
+    const sourceIndex = index;
+    startPointerDrag('reorder', payload, target, (targetSectionId, p) => {
+      if (!currentDocument) return;
+      if (p.startsWith('reorder:') && targetSectionId) {
+        const sectionEl = document.querySelector<HTMLElement>(`[data-section-id="${targetSectionId}"]`);
+        const dropIndex = parseInt(sectionEl?.dataset.dropIndex ?? '', 10);
+        if (isNaN(dropIndex) || dropIndex === sourceIndex) return;
         const newSections = [...currentDocument.sections];
-        const [draggedItem] = newSections.splice(dragIndex, 1);
-        newSections.splice(index, 0, draggedItem);
+        const [draggedItem] = newSections.splice(sourceIndex, 1);
+        newSections.splice(dropIndex, 0, draggedItem);
         reorderSections(newSections);
       }
-    } else {
-      console.log('[SECTION] drop - unhandled payload');
-    }
-    setIsDragging(false);
+    });
   };
 
-  // ─── Other handlers ───────────────────────────────────────────────────────
   const handleDuplicate = (e: React.MouseEvent) => {
     e.stopPropagation();
     if (!currentDocument) return;
@@ -135,27 +83,23 @@ export const SectionWrapper: React.FC<SectionWrapperProps> = ({
   return (
     <div
       data-section-root="true"
-      onDragOver={handleDragOver}
-      onDragLeave={handleDragLeave}
-      onDrop={handleDrop}
+      data-section-id={section.id}
+      data-drop-index={index}
+      data-section-drag-over="false"
       onMouseEnter={() => setIsHovered(true)}
       onMouseLeave={() => setIsHovered(false)}
       onClick={(e) => { e.stopPropagation(); onSelect(); }}
-      className={`group relative my-2 px-10 py-6 transition-all duration-200 rounded-lg cursor-pointer
+      className={`group relative my-2 px-10 py-6 transition-all duration-200 rounded-lg cursor-pointer border-2 border-transparent
         ${isActive ? 'bg-slate-900/50 shadow-md ring-2 ring-indigo-500/50' : 'hover:bg-slate-950/30'}
-        ${isDragging ? 'opacity-40 border-2 border-dashed border-indigo-400' : ''}
-        ${isDragOver ? 'border-2 border-dashed border-orange-500 bg-orange-500/5' : 'border-2 border-transparent'}
       `}
+      style={{}}
     >
       {/* Side Action panel */}
       <div className={`absolute left-2 top-1/2 -translate-y-1/2 flex flex-col items-center gap-1.5 p-1 rounded-md bg-slate-950 border border-slate-800 shadow-lg transition-opacity duration-200 no-print z-10
         ${isHovered || isActive ? 'opacity-100' : 'opacity-0 pointer-events-none'}
       `}>
-        {/* Grip handle — itself draggable; no async state needed */}
         <div
-          draggable
-          onDragStart={handleGripDragStart}
-          onDragEnd={handleGripDragEnd}
+          onPointerDown={handleGripPointerDown}
           className="p-1 cursor-grab hover:bg-slate-800 rounded text-slate-400 hover:text-slate-200 active:cursor-grabbing select-none"
           title="Drag to reorder"
         >

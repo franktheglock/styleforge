@@ -4,7 +4,7 @@ import {
   X, RotateCcw, AlignLeft, AlignCenter, AlignRight, Palette 
 } from 'lucide-react';
 import { StyleProperties } from '../types';
-import { startDrag, clearDragPayload, getDragPayload } from '../editor/dragState';
+import { startPointerDrag } from '../editor/pointerDrag';
 
 export const RightSidebar: React.FC = () => {
   const { 
@@ -13,6 +13,7 @@ export const RightSidebar: React.FC = () => {
     activeTokenKey, 
     setActiveTokenKey, 
     updateStyleToken,
+    updateSectionStyleToken,
     updateSectionStyleProps,
   } = useDocumentStore();
 
@@ -72,28 +73,24 @@ export const RightSidebar: React.FC = () => {
           return (
             <span
               key={key}
-              draggable
               role="button"
               tabIndex={0}
               onKeyDown={(e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); setActiveTokenKey(key); } }}
-              onMouseDown={(e) => {
-                console.log('[TOKEN] mousedown', { key, button: e.button });
-              }}
-              onDragStart={(e) => {
+              onPointerDown={(e) => {
+                if (e.button !== 0) return;
+                e.preventDefault();
+                setActiveTokenKey(key);
+                const target = e.currentTarget as HTMLElement;
                 const payload = `token:${key}`;
-                console.log('[TOKEN] dragstart', { key, payload });
-                startDrag(payload);
-                console.log('[TOKEN] after startDrag, getDragPayload:', getDragPayload());
-                e.dataTransfer.effectAllowed = 'copy';
-                try { e.dataTransfer.setData('text/plain', payload); } catch (_) {}
-                console.log('[TOKEN] dragstart done, dataTransfer types:', Array.from(e.dataTransfer.types));
+                startPointerDrag('token', payload, target, (targetSectionId, p) => {
+                  if (targetSectionId && p.startsWith('token:')) {
+                    const tokenKey = p.slice('token:'.length);
+                    updateSectionStyleToken(targetSectionId, tokenKey);
+                  }
+                });
               }}
-              onDragEnd={(e) => {
-                console.log('[TOKEN] dragend', { key, defaultPrevented: e.defaultPrevented });
-                clearDragPayload();
-              }}
-              onClick={() => setActiveTokenKey(key)}
-              className={`px-2.5 py-1 rounded text-[10px] font-mono transition-all cursor-grab active:cursor-grabbing inline-block select-auto
+              onClick={(e) => { e.preventDefault(); setActiveTokenKey(key); }}
+              className={`px-2.5 py-1 rounded text-[10px] font-mono transition-all cursor-grab active:cursor-grabbing inline-block select-none
                 ${isActive 
                   ? 'bg-orange-500/20 text-orange-400 border border-orange-500/30' 
                   : 'bg-slate-900 border border-slate-800 hover:border-slate-700 text-slate-400 hover:text-slate-200'

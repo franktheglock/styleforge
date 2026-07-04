@@ -32,6 +32,13 @@ body {
   background: #4b5563;
 }
 
+/* Section drag-over highlight (used by pointer-based drag system) */
+[data-section-root][data-section-drag-over="true"] {
+  border: 2px dashed rgb(249, 115, 22) !important;
+  background: rgba(249, 115, 22, 0.05) !important;
+  cursor: copy;
+}
+
 /* Force ProseMirror inner elements to inherit custom Style Token properties */
 .ProseMirror h1,
 .ProseMirror h2,

@@ -8,8 +8,7 @@ import { TableRow } from '@tiptap/extension-table-row';
 import { TableCell } from '@tiptap/extension-table-cell';
 import { TableHeader } from '@tiptap/extension-table-header';
 import { Section, StyleProperties } from '../types';
-import { ZoomIn, ZoomOut, Maximize2, FileText } from 'lucide-react';
-import { getDragPayload } from './dragState';
+import { ZoomIn, ZoomOut, Maximize2, FileText, Plus, Type, AlignLeft, List, Minus, Table as TableIcon } from 'lucide-react';
 
 // Inline style builder matching the style token system
 export const resolveStyle = (tokenKey: string, tokens: Record<string, StyleProperties>): StyleProperties => {
@@ -84,26 +83,6 @@ const SectionEditor: React.FC<{ section: Section; tokens: Record<string, StylePr
       attributes: {
         class: 'focus:outline-none min-h-[20px] w-full',
       },
-      handleDOMEvents: {
-        // Prevent ProseMirror from intercepting our custom drag-and-drop events.
-        // Returning true tells ProseMirror "handled" so it doesn't stop propagation,
-        // allowing dragover/drop to bubble up to the SectionWrapper div.
-        dragover: (_view, event) => {
-          const payload = getDragPayload();
-          if (payload.startsWith('token:') || payload.startsWith('reorder:')) {
-            event.preventDefault();
-            return true;
-          }
-          return false;
-        },
-        drop: (_view, _event) => {
-          const payload = getDragPayload();
-          if (payload.startsWith('token:') || payload.startsWith('reorder:')) {
-            return true;
-          }
-          return false;
-        },
-      },
     },
     onUpdate: ({ editor }) => {
       updateSectionContent(section.id, editor.getJSON());
@@ -146,7 +125,8 @@ const PAGE_PADDING = 60;
 const PAGE_GAP = 28;
 
 export const DocumentEditor: React.FC = () => {
-  const { currentDocument, activeSectionId, setActiveSectionId } = useDocumentStore();
+  const { currentDocument, activeSectionId, setActiveSectionId, addSection } = useDocumentStore();
+  const [showAddMenu, setShowAddMenu] = useState(false);
   const [zoom, setZoom] = useState(1.0);
   const [numPages, setNumPages] = useState(1);
   const contentRef = useRef<HTMLDivElement>(null);
@@ -168,49 +148,6 @@ export const DocumentEditor: React.FC = () => {
     observer.observe(el);
     return () => observer.disconnect();
   }, [currentDocument]);
-
-  // Global dragover preventDefault — prevents the no-drop cursor from ever
-  // appearing during a drag, regardless of which element is under the cursor
-  // (Tiptap contenteditable handles dragover internally and doesn't bubble it).
-  useEffect(() => {
-    const suppress = (e: DragEvent) => {
-      console.log('[DOCEDITOR] suppress', e.type, 'on', (e.target as HTMLElement)?.tagName, (e.target as HTMLElement)?.className?.slice(0, 40));
-      e.preventDefault();
-    };
-    let active = false;
-
-    const onStart = () => {
-      if (active) return;
-      active = true;
-      console.log('[DOCEDITOR] global dragstart — adding dragover/dragenter suppressors');
-      document.addEventListener('dragover', suppress);
-      document.addEventListener('dragenter', suppress);
-    };
-    const onEnd = () => {
-      if (!active) return;
-      active = false;
-      console.log('[DOCEDITOR] global dragend/drop — removing suppressors');
-      document.removeEventListener('dragover', suppress);
-      document.removeEventListener('dragenter', suppress);
-    };
-
-    document.addEventListener('dragstart', onStart);
-    const onDrag = (e: DragEvent) => {
-      console.log('[DOCEDITOR] drag event progressing, x:', e.clientX);
-    };
-    document.addEventListener('drag', onDrag);
-    document.addEventListener('dragend', onEnd);
-    document.addEventListener('drop', onEnd);
-
-    return () => {
-      document.removeEventListener('dragstart', onStart);
-      document.removeEventListener('drag', onDrag);
-      document.removeEventListener('dragend', onEnd);
-      document.removeEventListener('drop', onEnd);
-      document.removeEventListener('dragover', suppress);
-      document.removeEventListener('dragenter', suppress);
-    };
-  }, []);
 
   if (!currentDocument) {
     return (
@@ -238,6 +175,43 @@ export const DocumentEditor: React.FC = () => {
           <span className="text-[10px] px-2 py-0.5 rounded bg-indigo-500/20 text-indigo-300 font-mono">
             {currentDocument.styleProfile.name}
           </span>
+
+          {/* Add Section button + dropdown */}
+          <div className="relative ml-2">
+            <button
+              onClick={() => setShowAddMenu((s) => !s)}
+              className="flex items-center gap-1.5 px-2.5 py-1 rounded bg-indigo-500/20 hover:bg-indigo-500/30 text-indigo-300 text-xs font-medium transition-colors"
+              title="Add a new section"
+            >
+              <Plus size={14} /> Add Section
+            </button>
+            {showAddMenu && (
+              <>
+                <div className="fixed inset-0 z-40" onClick={() => setShowAddMenu(false)} />
+                <div className="absolute left-0 top-full mt-1 z-50 w-48 bg-[#1a1f2c] border border-slate-700 rounded shadow-xl py-1 text-sm">
+                  {[
+                    { type: 'heading' as const, label: 'Heading', icon: Type },
+                    { type: 'paragraph' as const, label: 'Paragraph', icon: AlignLeft },
+                    { type: 'list' as const, label: 'Bullet List', icon: List },
+                    { type: 'divider' as const, label: 'Divider', icon: Minus },
+                    { type: 'table' as const, label: 'Table', icon: TableIcon },
+                  ].map(({ type, label, icon: Icon }) => (
+                    <button
+                      key={type}
+                      onClick={() => {
+                        addSection(type);
+                        setShowAddMenu(false);
+                      }}
+                      className="w-full flex items-center gap-2 px-3 py-1.5 text-left text-slate-200 hover:bg-slate-800 transition-colors"
+                    >
+                      <Icon size={14} className="text-slate-400" />
+                      {label}
+                    </button>
+                  ))}
+                </div>
+              </>
+            )}
+          </div>
         </div>
         
         {/* Zoom controls */}
