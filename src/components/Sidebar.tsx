@@ -40,7 +40,8 @@ export const Sidebar: React.FC = () => {
     setIsLoading(true);
 
     try {
-      const reply = await applyAIOperations(userMsg);
+      const conversation = [...chatHistory, { role: 'user' as const, content: userMsg }];
+      const reply = await applyAIOperations(conversation);
       setChatHistory(prev => [...prev, { role: 'assistant', content: reply }]);
     } catch (err) {
       console.error(err);

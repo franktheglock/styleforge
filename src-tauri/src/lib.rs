@@ -31,6 +31,7 @@ pub fn run() {
             commands::ai::load_ai_providers,
             commands::ai::save_ai_provider,
             commands::ai::run_ai_operations,
+            commands::ai::stream_ai_operations,
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

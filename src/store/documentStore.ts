@@ -30,7 +30,7 @@ interface DocumentState {
   importFromString: (content: string, format: string) => Promise<void>;
   updateStyleToken: (tokenKey: string, properties: Partial<StyleProperties>) => Promise<void>;
   updateSectionStyleProps: (sectionId: string, properties: Partial<StyleProperties>) => void;
-  applyAIOperations: (userPrompt: string) => Promise<string>;
+  applyAIOperations: (messages: { role: string; content: string }[]) => Promise<string>;
   reorderSections: (sections: Section[]) => void;
   updateSectionContent: (sectionId: string, content: any) => void;
   updateSectionStyleToken: (sectionId: string, styleToken: string) => void;
@@ -207,7 +207,7 @@ export const useDocumentStore = create<DocumentState>((set, get) => ({
     });
   },
 
-  applyAIOperations: async (userPrompt) => {
+  applyAIOperations: async (messages: { role: string; content: string }[]) => {
     const doc = get().currentDocument;
     const providerId = get().selectedProviderId;
     if (!doc || !providerId) return '';
@@ -217,7 +217,7 @@ export const useDocumentStore = create<DocumentState>((set, get) => ({
     try {
       const payload = await invoke<{ document: DocumentModel; assistantMessage: string }>('run_ai_operations', {
         doc,
-        userPrompt,
+        messages,
         providerId
       });
       set({ currentDocument: payload.document });

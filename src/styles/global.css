@@ -128,6 +128,50 @@ body {
   outline: none;
 }
 
+/* Markdown rendering inside AI chat bubbles */
+.prose-markdown p { margin: 0 0 4px; }
+.prose-markdown p:last-child { margin-bottom: 0; }
+.prose-markdown ul, .prose-markdown ol { margin: 2px 0; padding-left: 16px; }
+.prose-markdown li { margin: 1px 0; }
+.prose-markdown code {
+  background: rgba(99, 102, 241, 0.12);
+  border-radius: 3px;
+  padding: 1px 4px;
+  font-size: inherit;
+  font-family: 'JetBrains Mono', monospace;
+}
+.prose-markdown pre {
+  background: #0a0f1d;
+  border: 1px solid #1d293d;
+  border-radius: 4px;
+  padding: 8px;
+  overflow-x: auto;
+  margin: 4px 0;
+}
+.prose-markdown pre code {
+  background: none;
+  padding: 0;
+}
+.prose-markdown strong { font-weight: 700; }
+.prose-markdown em { font-style: italic; }
+.prose-markdown h1, .prose-markdown h2, .prose-markdown h3 { font-weight: 600; margin: 6px 0 3px; }
+.prose-markdown h1 { font-size: 13px; }
+.prose-markdown h2 { font-size: 12px; }
+.prose-markdown h3 { font-size: 11px; }
+.prose-markdown a { color: #6366f1; text-decoration: underline; }
+.prose-markdown blockquote {
+  border-left: 2px solid #374151;
+  margin: 4px 0;
+  padding-left: 8px;
+  color: #94a3b8;
+}
+.prose-markdown table { border-collapse: collapse; margin: 4px 0; width: 100%; }
+.prose-markdown th, .prose-markdown td {
+  border: 1px solid #374151;
+  padding: 3px 6px;
+  text-align: left;
+}
+
 /* Print Overrides to Export Clean PDFs.
    Goal: hide every on-screen chrome element (A4 page backgrounds, page
    numbers, sidebars, buttons, tooltips), let the browser paginate the
