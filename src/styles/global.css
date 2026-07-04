@@ -128,8 +128,20 @@ body {
   outline: none;
 }
 
-/* Print Overrides to Export Clean PDFs */
+/* Print Overrides to Export Clean PDFs.
+   Goal: hide every on-screen chrome element (A4 page backgrounds, page
+   numbers, sidebars, buttons, tooltips), let the browser paginate the
+   document content naturally, and suppress the browser's own page
+   headers/footers. */
 @media print {
+  /* A4 paper, no browser margins. Removes the default "localhost:1420",
+     "1/3", "7/4/26, 4:22 PM" etc. that Edge/Chromium adds. */
+  @page {
+    size: A4;
+    margin: 16mm;
+  }
+
+  /* Hide all on-screen chrome */
   .no-print,
   header,
   .h-12,
@@ -137,37 +149,33 @@ body {
   .absolute.bottom-6,
   .no-print-action,
   button,
-  select {
+  select,
+  /* The on-screen A4 page backgrounds and the "Page N" gap labels */
+  .no-print-page-chrome,
+  /* Anything absolutely positioned inside the zoom wrapper (page breaks) */
+  .no-print {
     display: none !important;
   }
 
-  body, html, #root {
+  html, body, #root {
     background: white !important;
     color: #1a1a1a !important;
     height: auto !important;
     overflow: visible !important;
   }
 
-  /* Reset main flex layout scrolling */
-  .flex.flex-col.h-screen {
-    height: auto !important;
-    overflow: visible !important;
-  }
-  
-  .flex.flex-1.w-full {
+  /* Unwrap the app's flex layout so the document flows naturally */
+  .flex.flex-col.h-screen,
+  .flex.flex-1.w-full,
+  .flex-1.overflow-y-auto {
     display: block !important;
     height: auto !important;
     overflow: visible !important;
-  }
-
-  .flex-1.overflow-y-auto {
-    overflow: visible !important;
-    height: auto !important;
     padding: 0 !important;
     background: white !important;
   }
 
-  /* Style token A4 wrapper */
+  /* Drop the scale transform so the document prints at real size */
   .select-text {
     transform: none !important;
     border: none !important;
@@ -178,13 +186,38 @@ body {
     min-height: 0 !important;
   }
 
-  /* Section cards inside A4 paper */
+  /* Content area: real flow, no absolute positioning, no zoom-wrap offset */
+  .absolute.left-0.right-0 {
+    position: static !important;
+  }
+
+  /* Section cards: clean flow, no hover chrome, no drag styles */
   .group.relative {
     margin: 0 !important;
-    padding: 8px 0 !important;
+    padding: 4px 0 !important;
     border: none !important;
     background: transparent !important;
     box-shadow: none !important;
     page-break-inside: avoid;
   }
+
+  /* Hide the absolute-positioned "1" page counter and any sibling panels
+     that hover-stacked onto sections */
+  [data-section-root] > .absolute,
+  [data-section-root] > [class*="absolute"] {
+    display: none !important;
+  }
+
+  /* Reset the drag-over highlight to nothing in print */
+  [data-section-root][data-section-drag-over="true"] {
+    border: none !important;
+    background: transparent !important;
+  }
+
+  /* Tiptap cursor/caret shouldn't appear in printed output */
+  .ProseMirror-focused,
+  .ProseMirror * {
+    outline: none !important;
+  }
+  .ProseMirror ::selection { background: transparent !important; }
 }
