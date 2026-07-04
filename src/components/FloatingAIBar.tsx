@@ -48,6 +48,21 @@ export const FloatingAIBar: React.FC = () => {
     try {
       const conversation = [...messages, userMsg];
 
+      // Set up streaming listener BEFORE invoke to avoid missing early tokens
+      let accumulated = '';
+      const { listen } = await import('@tauri-apps/api/event');
+      const unlistenToken = await listen<string>('ai-stream:token', (event) => {
+        accumulated += event.payload;
+        setMessages((prev) => {
+          const copy = [...prev];
+          const last = copy[copy.length - 1];
+          if (last && last.role === 'assistant') {
+            copy[copy.length - 1] = { ...last, content: accumulated };
+          }
+          return copy;
+        });
+      });
+
       // Add a placeholder assistant message for streaming
       setMessages((prev) => [...prev, { role: 'assistant', content: '' }]);
 
@@ -57,22 +72,6 @@ export const FloatingAIBar: React.FC = () => {
         messages: conversation.map((m) => ({ role: m.role, content: m.content })),
         providerId: selectedProviderId,
       });
-
-      // Listen for streaming tokens during the request
-      let accumulated = '';
-      const unlistenToken = await import('@tauri-apps/api/event').then((m) =>
-        m.listen<string>('ai-stream:token', (event) => {
-          accumulated += event.payload;
-          setMessages((prev) => {
-            const copy = [...prev];
-            const last = copy[copy.length - 1];
-            if (last && last.role === 'assistant') {
-              copy[copy.length - 1] = { ...last, content: accumulated };
-            }
-            return copy;
-          });
-        })
-      );
 
       const payload = await payloadPromise;
       unlistenToken();

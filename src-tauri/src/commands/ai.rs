@@ -413,9 +413,12 @@ pub async fn stream_ai_operations(
                                         if let Some(id) = call.get("id").and_then(|i| i.as_str()) {
                                             if entry.0.is_none() { entry.0 = Some(id.to_string()); }
                                         }
-                                        if let Some(args) = call.get("function").and_then(|f| f.get("arguments")).and_then(|a| a.as_str()) {
-                                            entry.1.push_str(args);
-                                        }
+                            if let Some(args) = call.get("function").and_then(|f| f.get("arguments")) {
+                                match args {
+                                    serde_json::Value::String(s) => entry.1.push_str(s),
+                                    v => entry.1.push_str(&v.to_string()),
+                                }
+                            }
                                     }
                                 }
                                 has_tool_calls = true;
@@ -436,9 +439,10 @@ pub async fn stream_ai_operations(
     // Notify frontend that streaming is done
     app_handle.emit("ai-stream:done", "").map_err(|e| e.to_string())?;
 
-    // Process tool calls (re-parse through the normal tool call extraction)
+    // ── Process tool calls ──────────────────────────────────────────────
+    // 1. Try reconstructing from streamed delta.tool_calls chunks
+    let mut ops_applied = false;
     if has_tool_calls && !tool_call_buffers.is_empty() {
-        // Reconstruct the tool calls JSON in the format expected by parse_operations_from_tool_calls
         let reconstructed: Vec<serde_json::Value> = tool_call_buffers.into_iter().map(|(_, (id, args))| {
             serde_json::json!({
                 "id": id.unwrap_or_default(),
@@ -451,15 +455,31 @@ pub async fn stream_ai_operations(
         }).collect();
 
         let tc_val = serde_json::Value::Array(reconstructed);
-        if let Ok(ops) = parse_operations_from_tool_calls(&tc_val) {
-            if !ops.is_empty() {
+        match parse_operations_from_tool_calls(&tc_val) {
+            Ok(ops) if !ops.is_empty() => {
                 apply_operations(&mut doc, &ops)?;
                 doc.metadata.updated_at = chrono_now();
+                ops_applied = true;
+            }
+            _ => {} // fall through to full-text fallback
+        }
+    }
+
+    // 2. Fallback: try extracting tool calls from the accumulated text
+    if !ops_applied && has_tool_calls && !full_text.is_empty() {
+        if let Ok(json_array) = extract_json_array(&full_text) {
+            if let Ok(ops) = serde_json::from_str::<Vec<AICommandOperation>>(&json_array) {
+                if !ops.is_empty() {
+                    apply_operations(&mut doc, &ops)?;
+                    doc.metadata.updated_at = chrono_now();
+                    ops_applied = true;
+                }
             }
         }
-    } else if has_tool_calls && full_text.is_empty() {
-        // No streaming text and no accumulated tool calls — maybe the response
-        // had tool calls that we missed; try full-text fallback
+    }
+
+    // 3. Last resort: full non-streaming re-call
+    if has_tool_calls && !ops_applied {
         let fallback = run_ai_operations(doc, messages, provider_id).await?;
         app_handle.emit("ai-stream:done", &fallback.assistant_message).map_err(|e| e.to_string())?;
         return Ok(fallback);
