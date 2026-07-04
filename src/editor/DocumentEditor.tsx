@@ -287,23 +287,30 @@ export const DocumentEditor: React.FC = () => {
           className="select-text"
           onDragOver={(e) => e.preventDefault()}
         >
-          {/* One A4 page per entry in `pages`. Each page is a self-contained
-              container with its own white background and padding, so sections
-              never visually cross a page boundary. */}
+          {/* One A4 page per entry in `pages`. The container holds a fixed-size
+              page background (white sheet with shadow) and a content layer that
+              can extend beyond the sheet so tall sections render in full and
+              the browser can paginate them in print. */}
           {pages.map((pageSections, pageIdx) => (
             <div
               key={pageIdx}
-              className="absolute bg-white shadow-2xl rounded-sm border border-slate-200/80 no-print-page-chrome"
+              className="absolute no-print-page-chrome"
               style={{
                 top: pageIdx * (A4_PAGE_HEIGHT + PAGE_GAP),
                 left: 0,
                 width: A4_PAGE_WIDTH,
-                height: A4_PAGE_HEIGHT,
                 padding: `${PAGE_PADDING}px`,
-                overflow: 'hidden',
+                minHeight: A4_PAGE_HEIGHT,
               }}
               onClick={() => setActiveSectionId(null)}
             >
+              {/* A4 page background (fixed size, clipped to sheet shape) */}
+              <div
+                className="absolute inset-x-0 top-0 bg-white shadow-2xl rounded-sm border border-slate-200/80 pointer-events-none"
+                style={{ height: A4_PAGE_HEIGHT }}
+                aria-hidden
+              />
+
               <div className="space-y-1">
                 {pageSections.map((sec) => {
                   const idx = sectionIndexById.get(sec.id) ?? 0;

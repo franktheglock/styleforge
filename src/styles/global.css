@@ -207,6 +207,11 @@ body {
     overflow: visible !important;
   }
 
+  /* The inner A4 sheet div is purely a visual hint; hide it in print. */
+  .no-print-page-chrome > [aria-hidden="true"] {
+    display: none !important;
+  }
+
   /* Section cards: clean flow, no hover chrome, no drag styles */
   .group.relative {
     margin: 0 !important;
