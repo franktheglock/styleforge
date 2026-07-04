@@ -1,12 +1,14 @@
 import React, { useState, useEffect, useRef } from 'react';
 import { useDocumentStore } from '../store/documentStore';
-import { Sparkles, Settings, Send, RefreshCw, Cpu, Bot, User, X } from 'lucide-react';
+import { Sparkles, Settings, Send, RefreshCw, Cpu, Bot, User, X, ChevronDown, Brain } from 'lucide-react';
 import { marked } from 'marked';
 import { invoke } from '@tauri-apps/api/core';
 
 interface Msg {
   role: 'user' | 'assistant';
   content: string;
+  reasoning?: string;
+  toolCall?: string;
 }
 
 export const FloatingAIBar: React.FC = () => {
@@ -48,8 +50,9 @@ export const FloatingAIBar: React.FC = () => {
     try {
       const conversation = [...messages, userMsg];
 
-      // Set up streaming listener BEFORE invoke to avoid missing early tokens
+      // Set up streaming listeners BEFORE invoke to avoid missing early tokens
       let accumulated = '';
+      let accumulatedReasoning = '';
       const { listen } = await import('@tauri-apps/api/event');
       const unlistenToken = await listen<string>('ai-stream:token', (event) => {
         accumulated += event.payload;
@@ -62,12 +65,57 @@ export const FloatingAIBar: React.FC = () => {
           return copy;
         });
       });
+      const unlistenReasoning = await listen<string>('ai-stream:reasoning', (event) => {
+        accumulatedReasoning += event.payload;
+        setMessages((prev) => {
+          const copy = [...prev];
+          const last = copy[copy.length - 1];
+          if (last && last.role === 'assistant') {
+            copy[copy.length - 1] = { ...last, reasoning: accumulatedReasoning };
+          }
+          return copy;
+        });
+      });
+      const unlistenReasoningClear = await listen<string>('ai-stream:reasoning-clear', () => {
+        accumulatedReasoning = '';
+        setMessages((prev) => {
+          const copy = [...prev];
+          const last = copy[copy.length - 1];
+          if (last && last.role === 'assistant') {
+            copy[copy.length - 1] = { ...last, reasoning: '' };
+          }
+          return copy;
+        });
+      });
+      const unlistenToolCall = await listen<string>('ai-stream:tool-call', (event) => {
+        setMessages((prev) => {
+          const copy = [...prev];
+          // Check if the last message is already a tool call for the same tool
+          const last = copy[copy.length - 1];
+          if (last && last.role === 'assistant' && last.content === '' && !last.reasoning) {
+            // Replace the empty placeholder
+            copy[copy.length - 1] = { role: 'assistant', content: '', reasoning: '', toolCall: event.payload };
+          } else if (last && last.role === 'assistant' && last.toolCall) {
+            // Update existing tool call message
+            copy[copy.length - 1] = { ...last, toolCall: event.payload };
+          } else {
+            // Add new tool call message
+            copy.push({ role: 'assistant', content: '', reasoning: '', toolCall: event.payload });
+          }
+          return copy;
+        });
+      });
+      const unlistenDocUpdate = await listen<any>('ai-stream:document-update', (event) => {
+        if (event.payload) {
+          useDocumentStore.setState({ currentDocument: event.payload });
+        }
+      });
 
       // Add a placeholder assistant message for streaming
-      setMessages((prev) => [...prev, { role: 'assistant', content: '' }]);
+      setMessages((prev) => [...prev, { role: 'assistant', content: '', reasoning: '' }]);
 
-      // Start the streaming command; it emits ai-stream:token / ai-stream:done events
-      const payloadPromise: Promise<{ document: any; assistantMessage: string }> = invoke('stream_ai_operations', {
+      // Start the streaming command; it emits ai-stream:token / ai-stream:reasoning / ai-stream:done events
+      const payloadPromise: Promise<{ document: any; assistantMessage: string; reasoning?: string }> = invoke('stream_ai_operations', {
         doc: currentDocument,
         messages: conversation.map((m) => ({ role: m.role, content: m.content })),
         providerId: selectedProviderId,
@@ -75,6 +123,10 @@ export const FloatingAIBar: React.FC = () => {
 
       const payload = await payloadPromise;
       unlistenToken();
+      unlistenReasoning();
+      unlistenReasoningClear();
+      unlistenToolCall();
+      unlistenDocUpdate();
 
       // Update the document store with the result
       if (payload.document) {
@@ -86,7 +138,11 @@ export const FloatingAIBar: React.FC = () => {
         const copy = [...prev];
         const last = copy[copy.length - 1];
         if (last && last.role === 'assistant') {
-          copy[copy.length - 1] = { role: 'assistant', content: payload.assistantMessage || accumulated || 'Done!' };
+          copy[copy.length - 1] = {
+            role: 'assistant',
+            content: payload.assistantMessage || accumulated,
+            reasoning: payload.reasoning || accumulatedReasoning || undefined,
+          };
         }
         return copy;
       });
@@ -138,10 +194,29 @@ export const FloatingAIBar: React.FC = () => {
                   ? 'bg-slate-900/80 text-slate-200 border border-slate-800'
                   : 'bg-indigo-500/10 text-indigo-200 border border-indigo-500/20'
               }`}>
-                {msg.role === 'assistant' && !msg.content ? (
+                {msg.toolCall ? (
+                  <div className="flex items-center gap-1.5 text-[10px] text-slate-400">
+                    <RefreshCw size={10} className="animate-spin" />
+                    <span>Using <span className="text-orange-400 font-medium">{msg.toolCall}</span>...</span>
+                  </div>
+                ) : msg.role === 'assistant' && !msg.content && !msg.reasoning ? (
                   <RefreshCw size={12} className="animate-spin text-slate-400" />
                 ) : (
-                  <div className="prose-markdown" dangerouslySetInnerHTML={{ __html: marked.parse(msg.content) }} />
+                  <>
+                    {msg.reasoning && (
+                      <details open className="mb-1.5 group cursor-pointer">
+                        <summary className="flex items-center gap-1.5 text-[10px] text-slate-500 hover:text-slate-300 transition-colors select-none">
+                          <ChevronDown size={10} className="transition-transform group-open:rotate-180" />
+                          <Brain size={10} />
+                          <span className={i === messages.length - 1 && isLoading ? 'animate-pulse' : ''}>Thinking</span>
+                        </summary>
+                        <div className="mt-1.5 pl-3 border-l-2 border-slate-700 text-[10px] text-slate-400 leading-relaxed whitespace-pre-wrap">
+                          {msg.reasoning}
+                        </div>
+                      </details>
+                    )}
+                    <div className="prose-markdown" dangerouslySetInnerHTML={{ __html: marked.parse(msg.content) }} />
+                  </>
                 )}
               </div>
             </div>

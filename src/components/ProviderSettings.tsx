@@ -14,7 +14,7 @@ export const ProviderSettings: React.FC<ProviderSettingsProps> = ({ isOpen, onCl
 
   // Form states
   const [name, setName] = useState('');
-  const [providerType, setProviderType] = useState<AIProviderType>('Ollama');
+  const [providerType, setProviderType] = useState<AIProviderType>('LMStudio');
   const [endpoint, setEndpoint] = useState('');
   const [apiKey, setApiKey] = useState('');
   const [modelName, setModelName] = useState('');
@@ -55,10 +55,9 @@ export const ProviderSettings: React.FC<ProviderSettingsProps> = ({ isOpen, onCl
   const handleCreateNew = () => {
     setSelectedProvider(null);
     setName('New Provider');
-    setProviderType('Ollama');
-    setEndpoint('http://localhost:11434');
-    setApiKey('');
-    setModelName('llama3');
+    setProviderType('LMStudio');
+    setEndpoint('http://127.0.0.1:1234/v1');
+    setModelName('meta-llama-3-8b-instruct');
     setTemperature(0.2);
     setMaxTokens(2048);
     setIsDefault(false);
@@ -184,7 +183,6 @@ export const ProviderSettings: React.FC<ProviderSettingsProps> = ({ isOpen, onCl
                     setProviderType(type);
                     // Autofill endpoints if creating new
                     if (!selectedProvider) {
-                      if (type === 'Ollama') setEndpoint('http://localhost:11434');
                       if (type === 'LMStudio') setEndpoint('http://localhost:1234/v1');
                       if (type === 'LlamaCpp') setEndpoint('http://localhost:8080');
                       if (type === 'OpenRouter') setEndpoint('https://openrouter.ai/api/v1');
@@ -193,7 +191,6 @@ export const ProviderSettings: React.FC<ProviderSettingsProps> = ({ isOpen, onCl
                   }}
                   className="bg-slate-900 border border-slate-800 rounded px-3 py-2 text-slate-200 focus:outline-none focus:border-indigo-500"
                 >
-                  <option value="Ollama">Ollama (Local)</option>
                   <option value="LMStudio">LM Studio (Local Server)</option>
                   <option value="LlamaCpp">Llama.cpp (Local Server)</option>
                   <option value="OpenRouter">OpenRouter (Cloud API)</option>

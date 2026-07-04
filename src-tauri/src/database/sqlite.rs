@@ -27,7 +27,7 @@ pub struct DbDocument {
 pub struct DbAIProvider {
     pub id: String,
     pub name: String,
-    pub provider_type: String, // Ollama, LMStudio, LlamaCpp, OpenRouter, NvidiaNim, Custom
+    pub provider_type: String, // LMStudio, LlamaCpp, OpenRouter, NvidiaNim, Custom
     pub endpoint: String,
     pub api_key: String,
     pub model_name: String,
@@ -177,17 +177,6 @@ fn seed_presets(conn: &mut Connection) -> Result<(), String> {
     // Seed default AI Providers (always run with INSERT OR IGNORE)
     let providers = vec![
         DbAIProvider {
-            id: "ollama_default".to_string(),
-            name: "Ollama (Local)".to_string(),
-            provider_type: "Ollama".to_string(),
-            endpoint: "http://127.0.0.1:11434".to_string(),
-            api_key: "".to_string(),
-            model_name: "llama3".to_string(),
-            temperature: 0.2,
-            max_tokens: 2048,
-            is_default: true,
-        },
-        DbAIProvider {
             id: "lmstudio_default".to_string(),
             name: "LM Studio".to_string(),
             provider_type: "LMStudio".to_string(),
@@ -196,7 +185,7 @@ fn seed_presets(conn: &mut Connection) -> Result<(), String> {
             model_name: "meta-llama-3-8b-instruct".to_string(),
             temperature: 0.2,
             max_tokens: 2048,
-            is_default: false,
+            is_default: true,
         },
         DbAIProvider {
             id: "llamacpp_default".to_string(),

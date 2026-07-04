@@ -1,7 +1,7 @@
-import React, { useState } from 'react';
+import React, { useState, useRef } from 'react';
 import { useDocumentStore } from '../store/documentStore';
 import { 
-  Upload, Sparkles, FolderOpen, Undo2, Redo2, X 
+  Upload, Sparkles, FolderOpen, Undo2, Redo2, X, FileText, File 
 } from 'lucide-react';
 import { invoke } from '@tauri-apps/api/core';
 
@@ -21,6 +21,47 @@ export const Header: React.FC = () => {
   const [importText, setImportText] = useState('');
   const [importFormat, setImportFormat] = useState('md');
   const [showImportModal, setShowImportModal] = useState(false);
+  const [isImporting, setIsImporting] = useState(false);
+  const fileInputRef = useRef<HTMLInputElement>(null);
+
+  const handleFileSelect = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+
+    const ext = file.name.split('.').pop()?.toLowerCase() || '';
+
+    if (ext === 'pdf') {
+      setIsImporting(true);
+      try {
+        const buffer = await file.arrayBuffer();
+        const bytes = new Uint8Array(buffer);
+        let binary = '';
+        for (let i = 0; i < bytes.length; i++) {
+          binary += String.fromCharCode(bytes[i]);
+        }
+        const base64 = btoa(binary);
+        const doc = await invoke<any>('import_pdf_base64', { base64Content: base64 });
+        setCurrentDocument(doc);
+        await loadStyleProfiles();
+        setShowImportModal(false);
+      } catch (err) {
+        console.error(err);
+        alert('PDF import failed: ' + err);
+      } finally {
+        setIsImporting(false);
+      }
+    } else {
+      const formatMap: Record<string, string> = {
+        md: 'md', markdown: 'md', html: 'html', htm: 'html', txt: 'md',
+      };
+      const detectedFormat = formatMap[ext] || 'md';
+      setImportFormat(detectedFormat);
+      const text = await file.text();
+      setImportText(text);
+    }
+
+    e.target.value = '';
+  };
 
   const handleExport = async (format: 'html' | 'md' | 'json') => {
     if (!currentDocument) return;
@@ -208,6 +249,33 @@ export const Header: React.FC = () => {
                 <X size={14} />
               </button>
             </div>
+
+            {/* Hidden file input */}
+            <input
+              ref={fileInputRef}
+              type="file"
+              accept=".md,.markdown,.html,.htm,.txt,.pdf"
+              onChange={handleFileSelect}
+              className="hidden"
+            />
+
+            <div className="flex items-center gap-2">
+              <button
+                onClick={() => fileInputRef.current?.click()}
+                className="flex items-center gap-1.5 px-3 py-1.5 rounded text-[10px] font-medium bg-[#181d28] border border-slate-800 hover:border-slate-700 hover:bg-slate-800 text-slate-300 transition-colors"
+              >
+                <FileText size={12} />
+                Browse Files
+              </button>
+              <span className="text-[10px] text-slate-500">.md .html .txt .pdf</span>
+            </div>
+
+            {isImporting && (
+              <div className="text-[10px] text-orange-400 font-medium text-center py-2">
+                Importing PDF...
+              </div>
+            )}
+
             <form onSubmit={handleImportSubmit} className="space-y-3">
               <div className="flex gap-4 items-center">
                 <label className="text-[10px] text-slate-400">Format</label>
@@ -232,7 +300,7 @@ export const Header: React.FC = () => {
               <textarea
                 value={importText}
                 onChange={(e) => setImportText(e.target.value)}
-                placeholder="Paste Markdown or HTML code here..."
+                placeholder="Paste Markdown or HTML code here, or browse for a file..."
                 rows={8}
                 className="w-full bg-[#181d28] border border-slate-800 rounded p-2 text-xs text-slate-200 focus:outline-none focus:border-orange-500 font-mono"
               />

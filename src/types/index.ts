@@ -60,7 +60,7 @@ export interface DocumentModel {
 }
 
 // AI Configuration Types
-export type AIProviderType = 'Ollama' | 'LMStudio' | 'LlamaCpp' | 'OpenRouter' | 'NvidiaNim' | 'Custom';
+export type AIProviderType = 'LMStudio' | 'LlamaCpp' | 'OpenRouter' | 'NvidiaNim' | 'Custom';
 
 export interface AIProviderConfig {
   id: string;

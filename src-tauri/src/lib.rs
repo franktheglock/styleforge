@@ -25,6 +25,7 @@ pub fn run() {
         .invoke_handler(tauri::generate_handler![
             commands::import::import_document,
             commands::import::import_from_string,
+            commands::import::import_pdf_base64,
             commands::export::export_document,
             commands::styles::load_profiles,
             commands::styles::save_profile,

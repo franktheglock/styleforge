@@ -1,5 +1,4 @@
 pub mod provider;
-pub mod ollama;
 pub mod lmstudio;
 pub mod llamacpp;
 pub mod openrouter;
@@ -17,6 +16,8 @@ pub struct ChatMessage {
     pub tool_call_id: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub name: Option<String>, // tool name for tool role
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub tool_calls: Option<serde_json::Value>,
 }
 
 #[derive(Debug, Deserialize, Serialize, Clone)]
@@ -30,5 +31,6 @@ pub struct ChatRequest {
 #[derive(Debug, Deserialize, Serialize, Clone)]
 pub struct ChatResponse {
     pub content: Option<String>,
+    pub reasoning: Option<String>,
     pub tool_calls: Option<serde_json::Value>,
 }

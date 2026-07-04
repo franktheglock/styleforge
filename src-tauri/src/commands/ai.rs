@@ -2,7 +2,6 @@ use crate::database::sqlite::{get_conn, DbAIProvider};
 use crate::style::DocumentModel;
 use crate::ai::{ChatRequest, ChatMessage};
 use crate::ai::provider::AIProvider;
-use crate::ai::ollama::OllamaProvider;
 use crate::ai::lmstudio::LMStudioProvider;
 use crate::ai::llamacpp::LlamaCppProvider;
 use crate::ai::openrouter::OpenRouterProvider;
@@ -85,6 +84,119 @@ pub fn save_ai_provider(provider: DbAIProvider) -> Result<(), String> {
 pub struct AIResponsePayload {
     pub document: DocumentModel,
     pub assistant_message: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub reasoning: Option<String>,
+}
+
+fn build_tools() -> serde_json::Value {
+    serde_json::json!([
+        {
+            "type": "function",
+            "function": {
+                "name": "insert_section",
+                "description": "Insert a new section into the document at a specific position.",
+                "parameters": {
+                    "type": "object",
+                    "properties": {
+                        "section_type": {
+                            "type": "string",
+                            "enum": ["heading", "paragraph", "list", "table", "divider"],
+                            "description": "The type of section to insert."
+                        },
+                        "after_id": {
+                            "type": "string",
+                            "description": "Insert after this section ID. Omit to place at the beginning."
+                        },
+                        "style_token": {
+                            "type": "string",
+                            "description": "Style token name to apply to the new section."
+                        },
+                        "content": {
+                            "type": "object",
+                            "description": "Tiptap JSON content node for the section."
+                        }
+                    },
+                    "required": ["section_type"]
+                }
+            }
+        },
+        {
+            "type": "function",
+            "function": {
+                "name": "move_section",
+                "description": "Move an existing section to a new position in the document.",
+                "parameters": {
+                    "type": "object",
+                    "properties": {
+                        "target_id": {
+                            "type": "string",
+                            "description": "The ID of the section to move."
+                        },
+                        "after_id": {
+                            "type": "string",
+                            "description": "Move after this section ID. Omit to move to the beginning."
+                        }
+                    },
+                    "required": ["target_id"]
+                }
+            }
+        },
+        {
+            "type": "function",
+            "function": {
+                "name": "delete_section",
+                "description": "Delete a section from the document by its ID.",
+                "parameters": {
+                    "type": "object",
+                    "properties": {
+                        "target_id": {
+                            "type": "string",
+                            "description": "The ID of the section to delete."
+                        }
+                    },
+                    "required": ["target_id"]
+                }
+            }
+        },
+        {
+            "type": "function",
+            "function": {
+                "name": "duplicate_section",
+                "description": "Duplicate an existing section, placing the copy right after the original.",
+                "parameters": {
+                    "type": "object",
+                    "properties": {
+                        "target_id": {
+                            "type": "string",
+                            "description": "The ID of the section to duplicate."
+                        }
+                    },
+                    "required": ["target_id"]
+                }
+            }
+        },
+        {
+            "type": "function",
+            "function": {
+                "name": "update_section_content",
+                "description": "Replace the Tiptap JSON content of an existing section.",
+                "parameters": {
+                    "type": "object",
+                    "properties": {
+                        "target_id": {
+                            "type": "string",
+                            "description": "The ID of the section to update."
+                        },
+                        "content": {
+                            "type": "object",
+                            "description": "New Tiptap JSON content for the section."
+                        }
+                    },
+                    "required": ["target_id", "content"]
+                }
+            }
+        }
+    ])
 }
 
 #[tauri::command]
@@ -115,57 +227,7 @@ pub async fn run_ai_operations(
         }).map_err(|e| e.to_string())?
     };
 
-    let tools = serde_json::json!([
-        {
-            "type": "function",
-            "function": {
-                "name": "edit_document_structure",
-                "description": "Translates the user instruction into a sequence of structural operations on the document.",
-                "parameters": {
-                    "type": "object",
-                    "properties": {
-                        "operations": {
-                            "type": "array",
-                            "description": "The sequential list of document mutations.",
-                            "items": {
-                                "type": "object",
-                                "properties": {
-                                    "operation": {
-                                        "type": "string",
-                                        "enum": ["insertSection", "moveSection", "deleteSection", "duplicateSection", "renameSection"],
-                                        "description": "Type of mutation to execute."
-                                    },
-                                    "targetId": {
-                                        "type": "string",
-                                        "description": "Section ID to target (delete, move, duplicate, rename)."
-                                    },
-                                    "afterId": {
-                                        "type": "string",
-                                        "description": "Section ID to insert after or move after."
-                                    },
-                                    "sectionType": {
-                                        "type": "string",
-                                        "enum": ["heading", "paragraph", "list", "table", "divider"],
-                                        "description": "Section tag type if inserting a new section."
-                                    },
-                                    "styleToken": {
-                                        "type": "string",
-                                        "description": "Global style token matching the style profile."
-                                    },
-                                    "content": {
-                                        "type": "object",
-                                        "description": "Tiptap JSON node structure representing the text contents."
-                                    }
-                                },
-                                "required": ["operation"]
-                            }
-                        }
-                    },
-                    "required": ["operations"]
-                }
-            }
-        }
-    ]);
+    let tools = build_tools();
 
     let system_prompt = build_system_prompt(&doc);
 
@@ -188,7 +250,6 @@ pub async fn run_ai_operations(
 
     // Dispatch request based on provider type
     let mut response = match config.provider_type.as_str() {
-        "Ollama" => OllamaProvider.chat(&config, chat_req).await?,
         "LMStudio" => LMStudioProvider.chat(&config, chat_req).await?,
         "LlamaCpp" => LlamaCppProvider.chat(&config, chat_req).await?,
         "OpenRouter" => OpenRouterProvider.chat(&config, chat_req).await?,
@@ -196,9 +257,21 @@ pub async fn run_ai_operations(
         _ => return Err(format!("Unsupported provider type: {}", config.provider_type)),
     };
 
-    // Parse tool calls (or fallback to raw JSON extraction)
+    // Parse tool calls into individual operations (or fallback to raw JSON extraction)
     let (parsed_ops, has_tool_calls) = if let Some(ref tool_calls) = response.tool_calls {
-        (parse_operations_from_tool_calls(tool_calls)?, true)
+        let mut ops = Vec::new();
+        if let Some(arr) = tool_calls.as_array() {
+            for call in arr {
+                let func_name = call.get("function").and_then(|f| f.get("name")).and_then(|n| n.as_str()).unwrap_or("");
+                if let Some(args) = extract_args_value(call) {
+                    if let Ok(op) = tool_call_to_operation(func_name, args) {
+                        ops.push(op);
+                    }
+                }
+            }
+        }
+        let has_tc = !ops.is_empty();
+        (ops, has_tc)
     } else if let Some(ref content) = response.content {
         if let Ok(json_array) = extract_json_array(content) {
             let ops = serde_json::from_str(&json_array).unwrap_or_default();
@@ -231,6 +304,7 @@ pub async fn run_ai_operations(
         full_messages.push(ChatMessage {
             role: "assistant".to_string(),
             content: "[tool calls executed]".to_string(),
+            tool_calls: response.tool_calls.clone(),
             ..Default::default()
         });
         full_messages.push(system_note);
@@ -243,7 +317,6 @@ pub async fn run_ai_operations(
         };
 
         let second_resp = match config.provider_type.as_str() {
-            "Ollama" => OllamaProvider.chat(&config, second_req).await?,
             "LMStudio" => LMStudioProvider.chat(&config, second_req).await?,
             "LlamaCpp" => LlamaCppProvider.chat(&config, second_req).await?,
             "OpenRouter" => OpenRouterProvider.chat(&config, second_req).await?,
@@ -266,6 +339,7 @@ pub async fn run_ai_operations(
     Ok(AIResponsePayload {
         document: doc,
         assistant_message,
+        reasoning: None,
     })
 }
 
@@ -300,40 +374,9 @@ pub async fn stream_ai_operations(
     };
 
     let system_prompt = build_system_prompt(&doc);
-    let tools = serde_json::json!([{
-        "type": "function",
-        "function": {
-            "name": "edit_document_structure",
-            "description": "Translates the user instruction into a sequence of structural operations on the document.",
-            "parameters": {
-                "type": "object",
-                "properties": {
-                    "operations": {
-                        "type": "array",
-                        "items": {
-                            "type": "object",
-                            "properties": {
-                                "operation": { "type": "string", "enum": ["insertSection", "moveSection", "deleteSection", "duplicateSection", "renameSection"] },
-                                "targetId": { "type": "string" },
-                                "afterId": { "type": "string" },
-                                "sectionType": { "type": "string", "enum": ["heading", "paragraph", "list", "table", "divider"] },
-                                "styleToken": { "type": "string" },
-                                "content": { "type": "object" }
-                            },
-                            "required": ["operation"]
-                        }
-                    }
-                },
-                "required": ["operations"]
-            }
-        }
-    }]);
+    let mut tools_opt: Option<serde_json::Value> = Some(build_tools());
 
-    let ep = config.endpoint.trim_end_matches('/');
-    let url = match config.provider_type.as_str() {
-        "Ollama" => format!("{}/api/chat", ep),
-        _ => format!("{}/v1/chat/completions", ep),
-    };
+    let url = format!("{}/v1/chat/completions", config.endpoint.trim_end_matches('/'));
 
     // ── Multi-step tool-use loop ─────────────────────────────────────────
     // Build the running conversation. Each round appends the model's
@@ -343,72 +386,35 @@ pub async fn stream_ai_operations(
     convo.extend(messages.clone());
 
     let mut final_text = String::new();
+    let mut final_reasoning = String::new();
     let max_rounds = 5;
 
     for _round in 0..max_rounds {
-        // Ollama doesn't have reliable streaming tool-call support — use
-        // non-streaming and process the response in one shot.
-        if config.provider_type.as_str() == "Ollama" {
-            let req = ChatRequest {
-                messages: convo.clone(),
-                temperature: Some(config.temperature),
-                max_tokens: Some(config.max_tokens),
-                tools: Some(tools.clone()),
-            };
-            let resp = OllamaProvider.chat(&config, req).await?;
-            let _ = app_handle.emit("ai-stream:done", &String::new());
-
-            // Emit any content
-            if let Some(content) = &resp.content {
-                if !content.is_empty() {
-                    final_text.push_str(content);
-                    let _ = app_handle.emit("ai-stream:token", content);
-                }
-            }
-
-            // Check for tool calls
-            if let Some(tcs) = &resp.tool_calls {
-                let (ops_applied, tool_results) = apply_tool_calls(
-                    &mut doc,
-                    tcs,
-                    &app_handle,
-                )?;
-                if !ops_applied && tool_results.is_empty() {
-                    // No tool calls processed; we're done
-                    break;
-                }
-                if !tool_results.is_empty() {
-                    // Add assistant's tool_calls to conversation
-                    convo.push(ChatMessage {
-                        role: "assistant".to_string(),
-                        content: resp.content.clone().unwrap_or_default(),
-                        ..Default::default()
-                    });
-                    // Add tool result messages
-                    for tr in tool_results {
-                        convo.push(ChatMessage {
-                            role: "tool".to_string(),
-                            content: tr.content,
-                            tool_call_id: Some(tr.tool_call_id),
-                            name: Some("edit_document_structure".to_string()),
-                            ..Default::default()
-                        });
-                    }
-                    continue;
-                }
-            }
-            break;
+        // Clear reasoning from previous rounds so the frontend shows each
+        // round's thinking in a separate dropdown.
+        if _round > 0 {
+            let _ = app_handle.emit("ai-stream:reasoning-clear", "");
         }
 
         // OpenAI-compatible streaming
-        let body = serde_json::json!({
-            "model": config.model_name,
-            "messages": convo.clone(),
-            "stream": true,
-            "temperature": config.temperature,
-            "max_tokens": config.max_tokens,
-            "tools": tools,
-        });
+        let body = if let Some(ref t) = tools_opt {
+            serde_json::json!({
+                "model": config.model_name,
+                "messages": convo.clone(),
+                "stream": true,
+                "temperature": config.temperature,
+                "max_tokens": config.max_tokens,
+                "tools": t,
+            })
+        } else {
+            serde_json::json!({
+                "model": config.model_name,
+                "messages": convo.clone(),
+                "stream": true,
+                "temperature": config.temperature,
+                "max_tokens": config.max_tokens,
+            })
+        };
 
         let client = reqwest::Client::new();
         let mut req = client.post(&url)
@@ -430,7 +436,8 @@ pub async fn stream_ai_operations(
 
         // Parse the streaming response: text content + tool call deltas
         let mut round_text = String::new();
-        let mut tool_call_buffers: std::collections::HashMap<usize, (Option<String>, String)> = std::collections::HashMap::new();
+        let mut round_reasoning = String::new();
+        let mut tool_call_buffers: std::collections::HashMap<usize, (Option<String>, Option<String>, String)> = std::collections::HashMap::new();
         let mut has_tool_calls = false;
 
         let mut line_buf = String::new();
@@ -455,12 +462,21 @@ pub async fn stream_ai_operations(
                     if let Some(choices) = json.get("choices").and_then(|c| c.as_array()) {
                         if let Some(choice) = choices.first() {
                             if let Some(delta) = choice.get("delta") {
+                                // Reasoning content (from reasoning models) gets
+                                // its own event so the frontend can show it in a
+                                // collapsible "thinking" dropdown separately from
+                                // the actual response.
+                                if let Some(reasoning) = delta.get("reasoning_content").and_then(|r| r.as_str()) {
+                                    if !reasoning.is_empty() {
+                                        round_reasoning.push_str(reasoning);
+                                        let _ = app_handle.emit("ai-stream:reasoning", reasoning);
+                                    }
+                                }
                                 // Text content from multiple possible fields
                                 let content_str: Option<String> = delta.get("content")
                                     .and_then(|c| c.as_str())
                                     .or_else(|| delta.get("text").and_then(|t| t.as_str()))
-                                    .map(|s| s.to_string())
-                                    .or_else(|| delta.get("reasoning_content").and_then(|r| r.as_str()).map(|s| s.to_string()));
+                                    .map(|s| s.to_string());
                                 if let Some(content) = content_str {
                                     if !content.is_empty() {
                                         round_text.push_str(&content);
@@ -471,14 +487,17 @@ pub async fn stream_ai_operations(
                                 if let Some(tc) = delta.get("tool_calls").and_then(|t| t.as_array()) {
                                     for call in tc {
                                         if let Some(idx) = call.get("index").and_then(|i| i.as_i64()).map(|i| i as usize) {
-                                            let entry = tool_call_buffers.entry(idx).or_insert((None, String::new()));
+                                            let entry = tool_call_buffers.entry(idx).or_insert((None, None, String::new()));
                                             if let Some(id) = call.get("id").and_then(|i| i.as_str()) {
                                                 if entry.0.is_none() { entry.0 = Some(id.to_string()); }
                                             }
+                                            if let Some(name) = call.get("function").and_then(|f| f.get("name")).and_then(|n| n.as_str()) {
+                                                if entry.1.is_none() { entry.1 = Some(name.to_string()); }
+                                            }
                                             if let Some(args) = call.get("function").and_then(|f| f.get("arguments")) {
                                                 match args {
-                                                    serde_json::Value::String(s) => entry.1.push_str(s),
-                                                    v => entry.1.push_str(&v.to_string()),
+                                                    serde_json::Value::String(s) => entry.2.push_str(s),
+                                                    v => entry.2.push_str(&v.to_string()),
                                                 }
                                             }
                                         }
@@ -499,7 +518,12 @@ pub async fn stream_ai_operations(
         }
         drop(stream_resp);
 
+        // Only keep the final round's reasoning — intermediate tool-call
+        // reasoning is not useful to the user.
         final_text.push_str(&round_text);
+        if !round_reasoning.is_empty() {
+            final_reasoning = round_reasoning.clone();
+        }
 
         // If no tool calls, we're done with this round
         if !has_tool_calls || tool_call_buffers.is_empty() {
@@ -507,19 +531,27 @@ pub async fn stream_ai_operations(
         }
 
         // Reconstruct tool calls and apply them
-        let reconstructed: Vec<serde_json::Value> = tool_call_buffers.iter().map(|(_, (id, args))| {
+        let reconstructed: Vec<serde_json::Value> = tool_call_buffers.iter().map(|(_, (id, name, args))| {
             serde_json::json!({
                 "id": id.clone().unwrap_or_default(),
                 "type": "function",
                 "function": {
-                    "name": "edit_document_structure",
+                    "name": name.clone().unwrap_or_else(|| "insert_section".to_string()),
                     "arguments": args
                 }
             })
         }).collect();
 
+        // Emit tool call events so frontend can show them live
+        for tc in &reconstructed {
+            if let Some(name) = tc.pointer("/function/name").and_then(|n| n.as_str()) {
+                let _ = app_handle.emit("ai-stream:tool-call", name);
+            }
+        }
+
+        let tool_calls_value = serde_json::Value::Array(reconstructed.clone());
         let tc_val = serde_json::Value::Array(reconstructed);
-        let (ops_applied, tool_results) = apply_tool_calls_from_value(
+        let (ops_applied, tool_results) = apply_tool_calls(
             &mut doc,
             &tc_val,
             &app_handle,
@@ -531,10 +563,14 @@ pub async fn stream_ai_operations(
             return Ok(fallback);
         }
 
+        // Emit the updated document so the frontend applies changes immediately
+        let _ = app_handle.emit("ai-stream:document-update", &doc);
+
         // Add assistant message (its tool calls) to conversation
         convo.push(ChatMessage {
             role: "assistant".to_string(),
             content: round_text.clone(),
+            tool_calls: Some(tool_calls_value),
             ..Default::default()
         });
 
@@ -544,10 +580,14 @@ pub async fn stream_ai_operations(
                 role: "tool".to_string(),
                 content: tr.content,
                 tool_call_id: Some(tr.tool_call_id),
-                name: Some("edit_document_structure".to_string()),
+                name: Some(tr.name),
                 ..Default::default()
             });
         }
+
+        // Don't include tools in subsequent rounds — the model should respond
+        // conversationally now, not call more tools.
+        tools_opt = None;
 
         // Update document metadata
         doc.metadata.updated_at = chrono_now();
@@ -559,12 +599,68 @@ pub async fn stream_ai_operations(
     Ok(AIResponsePayload {
         document: doc,
         assistant_message: final_text,
+        reasoning: Some(final_reasoning).filter(|r| !r.is_empty()),
     })
 }
 
 struct ToolResult {
     tool_call_id: String,
+    name: String,
     content: String,
+}
+
+fn extract_args_value(call: &serde_json::Value) -> Option<serde_json::Value> {
+    if let Some(args_str) = call.get("function").and_then(|f| f.get("arguments")).and_then(|a| a.as_str()) {
+        serde_json::from_str(args_str).ok()
+    } else {
+        call.get("function").and_then(|f| f.get("arguments")).cloned()
+    }
+}
+
+fn tool_call_to_operation(func_name: &str, args: serde_json::Value) -> Result<AICommandOperation, String> {
+    match func_name {
+        "insert_section" => Ok(AICommandOperation {
+            operation: "insertSection".to_string(),
+            target_id: None,
+            after_id: args.get("after_id").and_then(|v| v.as_str()).map(|s| s.to_string()),
+            section_type: args.get("section_type").and_then(|v| v.as_str()).map(|s| s.to_string()),
+            style_token: args.get("style_token").and_then(|v| v.as_str()).map(|s| s.to_string()),
+            content: args.get("content").cloned(),
+        }),
+        "move_section" => Ok(AICommandOperation {
+            operation: "moveSection".to_string(),
+            target_id: args.get("target_id").and_then(|v| v.as_str()).map(|s| s.to_string()),
+            after_id: args.get("after_id").and_then(|v| v.as_str()).map(|s| s.to_string()),
+            section_type: None,
+            style_token: None,
+            content: None,
+        }),
+        "delete_section" => Ok(AICommandOperation {
+            operation: "deleteSection".to_string(),
+            target_id: args.get("target_id").and_then(|v| v.as_str()).map(|s| s.to_string()),
+            after_id: None,
+            section_type: None,
+            style_token: None,
+            content: None,
+        }),
+        "duplicate_section" => Ok(AICommandOperation {
+            operation: "duplicateSection".to_string(),
+            target_id: args.get("target_id").and_then(|v| v.as_str()).map(|s| s.to_string()),
+            after_id: None,
+            section_type: None,
+            style_token: None,
+            content: None,
+        }),
+        "update_section_content" => Ok(AICommandOperation {
+            operation: "renameSection".to_string(),
+            target_id: args.get("target_id").and_then(|v| v.as_str()).map(|s| s.to_string()),
+            after_id: None,
+            section_type: None,
+            style_token: None,
+            content: args.get("content").cloned(),
+        }),
+        _ => Err(format!("Unknown tool: {}", func_name)),
+    }
 }
 
 fn apply_tool_calls(
@@ -578,53 +674,35 @@ fn apply_tool_calls(
     if let Some(arr) = tool_calls.as_array() {
         for call in arr {
             let id = call.get("id").and_then(|v| v.as_str()).unwrap_or("").to_string();
-            let func_name = call.get("function").and_then(|f| f.get("name")).and_then(|n| n.as_str()).unwrap_or("");
-            if func_name != "edit_document_structure" {
-                continue;
-            }
-            // Arguments can be a string or an object
-            let ops_result = if let Some(args_str) = call.get("function").and_then(|f| f.get("arguments")).and_then(|a| a.as_str()) {
-                parse_operations_from_args(args_str)
-            } else if let Some(args_obj) = call.get("function").and_then(|f| f.get("arguments")).and_then(|a| a.as_object()) {
-                serde_json::from_value::<Vec<AICommandOperation>>(serde_json::Value::Array(
-                    args_obj.get("operations")
-                        .and_then(|o| o.as_array())
-                        .cloned()
-                        .unwrap_or_default()
-                )).map_err(|e| format!("Failed to parse operations: {}", e))
-            } else {
-                Err("Tool call has no arguments".to_string())
+            let func_name = call.get("function").and_then(|f| f.get("name")).and_then(|n| n.as_str()).unwrap_or("").to_string();
+            let args = extract_args_value(call);
+            let op_result = match args {
+                Some(args_val) => tool_call_to_operation(&func_name, args_val),
+                None => Err(format!("No arguments for tool call '{}'", func_name)),
             };
-
-            match ops_result {
-                Ok(ops) if !ops.is_empty() => {
-                    if let Err(e) = apply_operations(doc, &ops) {
+            match op_result {
+                Ok(op) => {
+                    if let Err(e) = apply_operations(doc, &[op]) {
                         let _ = app_handle.emit("ai-stream:done", &e);
                         results.push(ToolResult {
-                            tool_call_id: id,
-                            content: format!("Error applying operations: {}", e),
+                            tool_call_id: id.clone(),
+                            name: func_name.clone(),
+                            content: format!("Error applying {}: {}", func_name, e),
                         });
                     } else {
                         ops_applied = true;
                         results.push(ToolResult {
-                            tool_call_id: id,
-                            content: format!("Successfully applied {} operations: {}",
-                                ops.len(),
-                                ops.iter().map(|o| format!("{:?}", o)).collect::<Vec<_>>().join(", ")
-                            ),
+                            tool_call_id: id.clone(),
+                            name: func_name.clone(),
+                            content: format!("Successfully applied {}", func_name),
                         });
                     }
-                }
-                Ok(_) => {
-                    results.push(ToolResult {
-                        tool_call_id: id,
-                        content: "No operations to apply".to_string(),
-                    });
                 }
                 Err(e) => {
                     results.push(ToolResult {
                         tool_call_id: id,
-                        content: format!("Error parsing operations: {}", e),
+                        name: func_name.clone(),
+                        content: format!("Error parsing {}: {}", func_name, e),
                     });
                 }
             }
@@ -632,111 +710,6 @@ fn apply_tool_calls(
     }
 
     Ok((ops_applied, results))
-}
-
-fn apply_tool_calls_from_value(
-    doc: &mut DocumentModel,
-    tool_calls: &serde_json::Value,
-    app_handle: &tauri::AppHandle,
-) -> Result<(bool, Vec<ToolResult>), String> {
-    let mut results = Vec::new();
-    let mut ops_applied = false;
-
-    if let Some(arr) = tool_calls.as_array() {
-        for call in arr {
-            let id = call.get("id").and_then(|v| v.as_str()).unwrap_or("").to_string();
-            let func_name = call.get("function").and_then(|f| f.get("name")).and_then(|n| n.as_str()).unwrap_or("");
-            if func_name != "edit_document_structure" {
-                continue;
-            }
-
-            let args_str = call.get("function").and_then(|f| f.get("arguments")).and_then(|a| a.as_str());
-            let ops_result = if let Some(s) = args_str {
-                parse_operations_from_args(s)
-            } else if let Some(args_obj) = call.get("function").and_then(|f| f.get("arguments")).and_then(|a| a.as_object()) {
-                serde_json::from_value::<Vec<AICommandOperation>>(serde_json::Value::Array(
-                    args_obj.get("operations")
-                        .and_then(|o| o.as_array())
-                        .cloned()
-                        .unwrap_or_default()
-                )).map_err(|e| format!("Failed to parse operations: {}", e))
-            } else {
-                Err("Tool call has no arguments".to_string())
-            };
-
-            match ops_result {
-                Ok(ops) if !ops.is_empty() => {
-                    if let Err(e) = apply_operations(doc, &ops) {
-                        results.push(ToolResult {
-                            tool_call_id: id,
-                            content: format!("Error applying operations: {}", e),
-                        });
-                    } else {
-                        ops_applied = true;
-                        results.push(ToolResult {
-                            tool_call_id: id,
-                            content: format!("Applied {} operations successfully", ops.len()),
-                        });
-                    }
-                }
-                Ok(_) => {
-                    results.push(ToolResult {
-                        tool_call_id: id,
-                        content: "No operations to apply".to_string(),
-                    });
-                }
-                Err(e) => {
-                    results.push(ToolResult {
-                        tool_call_id: id,
-                        content: format!("Error: {}", e),
-                    });
-                }
-            }
-        }
-    }
-
-    Ok((ops_applied, results))
-}
-
-fn parse_operations_from_args(args_str: &str) -> Result<Vec<AICommandOperation>, String> {
-    let parsed: serde_json::Value = serde_json::from_str(args_str)
-        .map_err(|e| format!("Invalid tool arguments JSON: {}", e))?;
-    if let Some(ops) = parsed.get("operations") {
-        serde_json::from_value::<Vec<AICommandOperation>>(ops.clone())
-            .map_err(|e| format!("Failed to parse operations array: {}", e))
-    } else {
-        Ok(Vec::new())
-    }
-}
-
-fn parse_operations_from_tool_calls(tool_calls: &serde_json::Value) -> Result<Vec<AICommandOperation>, String> {
-    if let Some(arr) = tool_calls.as_array() {
-        for call in arr {
-            if let Some(func_name) = call["function"]["name"].as_str() {
-                if func_name == "edit_document_structure" {
-                    if let Some(args_str) = call["function"]["arguments"].as_str() {
-                        let parsed: serde_json::Value = serde_json::from_str(args_str)
-                            .map_err(|e| format!("Invalid tool arguments JSON string: {}", e))?;
-                        
-                        if let Some(ops) = parsed.get("operations") {
-                            let operations: Vec<AICommandOperation> = serde_json::from_value(ops.clone())
-                                .map_err(|e| format!("Failed to parse AICommandOperation array: {}", e))?;
-                            return Ok(operations);
-                        }
-                    } else if let Some(args_obj) = call["function"]["arguments"].as_object() {
-                        // Sometimes local providers return arguments directly parsed as JSON objects
-                        let args_val = serde_json::Value::Object(args_obj.clone());
-                        if let Some(ops) = args_val.get("operations") {
-                            let operations: Vec<AICommandOperation> = serde_json::from_value(ops.clone())
-                                .map_err(|e| format!("Failed to parse AICommandOperation array: {}", e))?;
-                            return Ok(operations);
-                        }
-                    }
-                }
-            }
-        }
-    }
-    Err("Failed to extract valid operations list from tool calls structure.".to_string())
 }
 
 fn extract_json_array(text: &str) -> Result<String, String> {

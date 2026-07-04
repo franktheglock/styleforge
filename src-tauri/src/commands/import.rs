@@ -2,6 +2,7 @@ use crate::style::{DocumentModel, extractor::extract_from_html};
 use pulldown_cmark::{Parser as MdParser, Options as MdOptions, html};
 use std::fs;
 use std::io::Read;
+use base64::Engine;
 
 #[tauri::command]
 pub fn import_document(path: String) -> Result<DocumentModel, String> {
@@ -15,7 +16,7 @@ pub fn import_document(path: String) -> Result<DocumentModel, String> {
         .to_lowercase();
 
     match extension.as_str() {
-        "md" | "markdown" => {
+        "md" | "markdown" | "txt" => {
             let markdown_str = String::from_utf8(file_content)
                 .map_err(|e| format!("Invalid UTF-8: {}", e))?;
             import_markdown(markdown_str)
@@ -28,14 +29,25 @@ pub fn import_document(path: String) -> Result<DocumentModel, String> {
         "docx" => {
             import_docx(&file_content)
         }
-        _ => Err("Unsupported document format. Please choose DOCX, Markdown, or HTML.".to_string()),
+        "pdf" => {
+            import_pdf_bytes(&file_content)
+        }
+        _ => Err("Unsupported document format. Please choose PDF, DOCX, Markdown, or HTML.".to_string()),
     }
+}
+
+#[tauri::command]
+pub fn import_pdf_base64(base64_content: String) -> Result<DocumentModel, String> {
+    let bytes = base64::engine::general_purpose::STANDARD
+        .decode(&base64_content)
+        .map_err(|e| format!("Invalid base64 PDF data: {}", e))?;
+    import_pdf_bytes(&bytes)
 }
 
 #[tauri::command]
 pub fn import_from_string(content: String, format: String) -> Result<DocumentModel, String> {
     match format.to_lowercase().as_str() {
-        "md" | "markdown" => import_markdown(content),
+        "md" | "markdown" | "txt" => import_markdown(content),
         "html" | "htm" => import_html(content),
         _ => Err("Unsupported document format".to_string()),
     }
@@ -71,6 +83,12 @@ fn import_html(html_content: String) -> Result<DocumentModel, String> {
         },
     };
     Ok(doc)
+}
+
+fn import_pdf_bytes(bytes: &[u8]) -> Result<DocumentModel, String> {
+    let text = pdf_extract::extract_text_from_mem(bytes)
+        .map_err(|e| format!("Failed to extract text from PDF: {}", e))?;
+    import_markdown(text)
 }
 
 fn import_docx(bytes: &[u8]) -> Result<DocumentModel, String> {

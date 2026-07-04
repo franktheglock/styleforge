@@ -15,10 +15,17 @@ impl AIProvider for LMStudioProvider {
         };
 
         let messages: Vec<serde_json::Value> = request.messages.iter().map(|msg| {
-            serde_json::json!({
+            let mut m = serde_json::json!({
                 "role": msg.role,
                 "content": msg.content
-            })
+            });
+            if let Some(tc) = &msg.tool_calls {
+                m["tool_calls"] = tc.clone();
+            }
+            if let Some(tcid) = &msg.tool_call_id {
+                m["tool_call_id"] = serde_json::Value::String(tcid.clone());
+            }
+            m
         }).collect();
 
         let mut payload = serde_json::json!({
@@ -57,6 +64,7 @@ impl AIProvider for LMStudioProvider {
 
         Ok(ChatResponse {
             content,
+            reasoning: None,
             tool_calls: if tool_calls.is_null() { None } else { Some(tool_calls) },
         })
     }
