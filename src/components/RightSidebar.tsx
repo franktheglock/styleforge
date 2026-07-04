@@ -1,10 +1,12 @@
 import React, { useState } from 'react';
 import { useDocumentStore } from '../store/documentStore';
 import { 
-  X, RotateCcw, AlignLeft, AlignCenter, AlignRight, Palette 
+  X, RotateCcw, AlignLeft, AlignCenter, AlignRight, Palette, FileText, Layers
 } from 'lucide-react';
 import { StyleProperties } from '../types';
 import { startPointerDrag } from '../editor/pointerDrag';
+
+type EditScope = 'section' | 'all';
 
 export const RightSidebar: React.FC = () => {
   const { 
@@ -18,6 +20,7 @@ export const RightSidebar: React.FC = () => {
   } = useDocumentStore();
 
   const [hexInput, setHexInput] = useState('');
+  const [editScope, setEditScope] = useState<EditScope>('section');
 
   if (!currentDocument) return null;
 
@@ -27,14 +30,31 @@ export const RightSidebar: React.FC = () => {
   // If no token is active, we can show a placeholder or the token list only
   const activeTokenProps = activeTokenKey ? tokens[activeTokenKey] || {} : null;
 
+  // How many sections currently use the active token? Used to decide whether
+  // a "scope" toggle is meaningful (it only matters when >1 section shares it).
+  const activeSection = activeSectionId
+    ? currentDocument.sections.find(s => s.id === activeSectionId)
+    : null;
+  const sectionsUsingActiveToken = activeTokenKey
+    ? currentDocument.sections.filter(s => s.styleToken === activeTokenKey).length
+    : 0;
+  const showScopeToggle = !!activeSection && sectionsUsingActiveToken > 1;
+
+  // If the active section changes (or the token is no longer shared), reset
+  // scope to the safe default.
+  React.useEffect(() => {
+    if (!showScopeToggle) setEditScope('section');
+  }, [activeSectionId, activeTokenKey, showScopeToggle]);
+
   const handleUpdateProp = (key: keyof StyleProperties, value: any) => {
-    if (activeSectionId) {
-      // Section is selected — edit properties scoped to just this section.
-      // updateSectionStyleProps auto-clones the token if it's shared, so
-      // only THIS section's appearance changes.
+    if (activeSectionId && editScope === 'section') {
+      // Section is selected + scope = "this section" — edit properties scoped
+      // to just this section. updateSectionStyleProps auto-clones the token
+      // if it's shared, so only THIS section's appearance changes.
       updateSectionStyleProps(activeSectionId, { [key]: value });
     } else if (activeTokenKey) {
-      // No section selected — editing the shared token directly from the token list.
+      // Scope = "all" (or no section selected) — editing the shared token
+      // directly, which propagates to every section using it.
       updateStyleToken(activeTokenKey, { [key]: value });
     }
   };
@@ -110,7 +130,13 @@ export const RightSidebar: React.FC = () => {
           <div className="px-4 py-3 bg-[#11141c]/50 flex items-center justify-between">
             <div className="flex flex-col">
               <span className="text-sm font-bold text-slate-100 capitalize">{activeTokenKey}</span>
-              <span className="text-[10px] text-slate-500 font-mono">style token override</span>
+              <span className="text-[10px] text-slate-500 font-mono">
+                {showScopeToggle
+                  ? `shared by ${sectionsUsingActiveToken} sections`
+                  : activeSection
+                    ? 'editing this section'
+                    : 'style token override'}
+              </span>
             </div>
             <button
               onClick={() => setActiveTokenKey(null)}
@@ -119,6 +145,36 @@ export const RightSidebar: React.FC = () => {
               <X size={14} />
             </button>
           </div>
+
+          {/* Scope toggle — only when a section is selected AND its token
+              is shared with other sections. Lets the user choose between
+              editing just this section (clone) vs. all sections (shared). */}
+          {showScopeToggle && (
+            <div className="px-4 py-2 bg-[#0e121b]">
+              <div className="flex gap-0.5 bg-[#090b10] p-0.5 rounded border border-slate-800 text-[10px]">
+                <button
+                  onClick={() => setEditScope('section')}
+                  className={`flex-1 flex items-center justify-center gap-1.5 py-1.5 rounded transition-colors ${
+                    editScope === 'section'
+                      ? 'bg-orange-500 text-slate-950 font-semibold shadow'
+                      : 'text-slate-400 hover:text-slate-200'
+                  }`}
+                >
+                  <FileText size={11} /> This section
+                </button>
+                <button
+                  onClick={() => setEditScope('all')}
+                  className={`flex-1 flex items-center justify-center gap-1.5 py-1.5 rounded transition-colors ${
+                    editScope === 'all'
+                      ? 'bg-orange-500 text-slate-950 font-semibold shadow'
+                      : 'text-slate-400 hover:text-slate-200'
+                  }`}
+                >
+                  <Layers size={11} /> All {sectionsUsingActiveToken} sections
+                </button>
+              </div>
+            </div>
+          )}
 
           {/* TYPOGRAPHY SECTION */}
           <div className="p-4 space-y-4">
@@ -345,7 +401,7 @@ export const RightSidebar: React.FC = () => {
                   indent: 0,
                   textAlign: 'left' as const
                 };
-                if (activeSectionId) {
+                if (activeSectionId && editScope === 'section') {
                   updateSectionStyleProps(activeSectionId, defaults);
                 } else if (activeTokenKey) {
                   updateStyleToken(activeTokenKey, defaults);
