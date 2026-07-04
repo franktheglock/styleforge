@@ -122,38 +122,38 @@ pub async fn run_ai_operations(
                 "name": "edit_document_structure",
                 "description": "Translates the user instruction into a sequence of structural operations on the document.",
                 "parameters": {
-                    "type": "OBJECT",
+                    "type": "object",
                     "properties": {
                         "operations": {
-                            "type": "ARRAY",
+                            "type": "array",
                             "description": "The sequential list of document mutations.",
                             "items": {
-                                "type": "OBJECT",
+                                "type": "object",
                                 "properties": {
                                     "operation": {
-                                        "type": "STRING",
+                                        "type": "string",
                                         "enum": ["insertSection", "moveSection", "deleteSection", "duplicateSection", "renameSection"],
                                         "description": "Type of mutation to execute."
                                     },
                                     "targetId": {
-                                        "type": "STRING",
+                                        "type": "string",
                                         "description": "Section ID to target (delete, move, duplicate, rename)."
                                     },
                                     "afterId": {
-                                        "type": "STRING",
+                                        "type": "string",
                                         "description": "Section ID to insert after or move after."
                                     },
                                     "sectionType": {
-                                        "type": "STRING",
+                                        "type": "string",
                                         "enum": ["heading", "paragraph", "list", "table", "divider"],
                                         "description": "Section tag type if inserting a new section."
                                     },
                                     "styleToken": {
-                                        "type": "STRING",
+                                        "type": "string",
                                         "description": "Global style token matching the style profile."
                                     },
                                     "content": {
-                                        "type": "OBJECT",
+                                        "type": "object",
                                         "description": "Tiptap JSON node structure representing the text contents."
                                     }
                                 },
@@ -306,19 +306,19 @@ pub async fn stream_ai_operations(
             "name": "edit_document_structure",
             "description": "Translates the user instruction into a sequence of structural operations on the document.",
             "parameters": {
-                "type": "OBJECT",
+                "type": "object",
                 "properties": {
                     "operations": {
-                        "type": "ARRAY",
+                        "type": "array",
                         "items": {
-                            "type": "OBJECT",
+                            "type": "object",
                             "properties": {
-                                "operation": { "type": "STRING", "enum": ["insertSection", "moveSection", "deleteSection", "duplicateSection", "renameSection"] },
-                                "targetId": { "type": "STRING" },
-                                "afterId": { "type": "STRING" },
-                                "sectionType": { "type": "STRING", "enum": ["heading", "paragraph", "list", "table", "divider"] },
-                                "styleToken": { "type": "STRING" },
-                                "content": { "type": "OBJECT" }
+                                "operation": { "type": "string", "enum": ["insertSection", "moveSection", "deleteSection", "duplicateSection", "renameSection"] },
+                                "targetId": { "type": "string" },
+                                "afterId": { "type": "string" },
+                                "sectionType": { "type": "string", "enum": ["heading", "paragraph", "list", "table", "divider"] },
+                                "styleToken": { "type": "string" },
+                                "content": { "type": "object" }
                             },
                             "required": ["operation"]
                         }
