@@ -24,7 +24,7 @@ export const FloatingAIBar: React.FC = () => {
   const [input, setInput] = useState('');
   const [isLoading, setIsLoading] = useState(false);
   const [messages, setMessages] = useState<Msg[]>([]);
-  const [inputVisible, setInputVisible] = useState(true);
+  const [chatVisible, setChatVisible] = useState(true);
   const listRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
@@ -163,17 +163,16 @@ export const FloatingAIBar: React.FC = () => {
 
   return (
     <div className="absolute bottom-6 left-1/2 -translate-x-1/2 z-40 w-[600px] flex flex-col items-center">
-      {/* Chat log */}
-      {messages.length > 0 && (
+      {/* Chat log — hidden when dismissed */}
+      {chatVisible && messages.length > 0 && (
         <div
           ref={listRef}
           className="w-full mb-3 bg-[#0d0f14]/95 border border-slate-800 rounded-2xl p-3 shadow-2xl max-h-[400px] overflow-y-auto space-y-2 relative"
         >
-          {/* Collapse / expand input bar button */}
           <button
-            onClick={() => setInputVisible(!inputVisible)}
+            onClick={() => setChatVisible(false)}
             className="absolute top-2 right-2 p-1 hover:bg-slate-800 rounded-full text-slate-500 hover:text-slate-300 transition-colors z-10"
-            title={inputVisible ? 'Hide input bar' : 'Show input bar'}
+            title="Close chat history"
           >
             <X size={12} />
           </button>
@@ -234,8 +233,7 @@ export const FloatingAIBar: React.FC = () => {
         </div>
       )}
 
-      {/* Floating Bar Container — hidden when dismissed */}
-      {inputVisible && (
+      {/* Floating Bar Container — always visible */}
       <form 
         onSubmit={handleSend}
         className={`w-full bg-[#0d0f14]/90 backdrop-blur-md border rounded-full px-4 py-2.5 flex items-center gap-3 shadow-2xl transition-all duration-300
@@ -296,7 +294,6 @@ export const FloatingAIBar: React.FC = () => {
           </button>
         </div>
       </form>
-      )}
     </div>
   );
 };
