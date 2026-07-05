@@ -24,7 +24,7 @@ export const FloatingAIBar: React.FC = () => {
   const [input, setInput] = useState('');
   const [isLoading, setIsLoading] = useState(false);
   const [messages, setMessages] = useState<Msg[]>([]);
-  const [isOpen, setIsOpen] = useState(true);
+  const [inputVisible, setInputVisible] = useState(true);
   const listRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
@@ -50,34 +50,35 @@ export const FloatingAIBar: React.FC = () => {
     try {
       const conversation = [...messages, userMsg];
 
-      // Set up streaming listeners BEFORE invoke to avoid missing early tokens
-      let accumulated = '';
-      let accumulatedReasoning = '';
+      let assistantTokenBuffer = '';
       const { listen } = await import('@tauri-apps/api/event');
       const unlistenToken = await listen<string>('ai-stream:token', (event) => {
-        accumulated += event.payload;
+        assistantTokenBuffer += event.payload;
         setMessages((prev) => {
           const copy = [...prev];
           const last = copy[copy.length - 1];
-          if (last && last.role === 'assistant') {
-            copy[copy.length - 1] = { ...last, content: accumulated };
+          // If last message is a tool-call or user, push a new assistant msg
+          if (!last || last.role === 'user' || last.toolCall) {
+            copy.push({ role: 'assistant', content: assistantTokenBuffer });
+          } else {
+            copy[copy.length - 1] = { ...last, content: assistantTokenBuffer };
           }
           return copy;
         });
       });
       const unlistenReasoning = await listen<string>('ai-stream:reasoning', (event) => {
-        accumulatedReasoning += event.payload;
         setMessages((prev) => {
           const copy = [...prev];
           const last = copy[copy.length - 1];
-          if (last && last.role === 'assistant') {
-            copy[copy.length - 1] = { ...last, reasoning: accumulatedReasoning };
+          if (last && last.role === 'assistant' && !last.toolCall) {
+            copy[copy.length - 1] = { ...last, reasoning: (last.reasoning || '') + event.payload };
+          } else {
+            copy.push({ role: 'assistant', content: '', reasoning: event.payload });
           }
           return copy;
         });
       });
       const unlistenReasoningClear = await listen<string>('ai-stream:reasoning-clear', () => {
-        accumulatedReasoning = '';
         setMessages((prev) => {
           const copy = [...prev];
           const last = copy[copy.length - 1];
@@ -90,17 +91,13 @@ export const FloatingAIBar: React.FC = () => {
       const unlistenToolCall = await listen<string>('ai-stream:tool-call', (event) => {
         setMessages((prev) => {
           const copy = [...prev];
-          // Check if the last message is already a tool call for the same tool
           const last = copy[copy.length - 1];
-          if (last && last.role === 'assistant' && last.content === '' && !last.reasoning) {
-            // Replace the empty placeholder
-            copy[copy.length - 1] = { role: 'assistant', content: '', reasoning: '', toolCall: event.payload };
-          } else if (last && last.role === 'assistant' && last.toolCall) {
-            // Update existing tool call message
-            copy[copy.length - 1] = { ...last, toolCall: event.payload };
+          // If last message is already a tool call for a different tool, push another
+          // Otherwise update or push
+          if (last && last.toolCall) {
+            copy.push({ role: 'assistant', toolCall: event.payload });
           } else {
-            // Add new tool call message
-            copy.push({ role: 'assistant', content: '', reasoning: '', toolCall: event.payload });
+            copy.push({ role: 'assistant', toolCall: event.payload });
           }
           return copy;
         });
@@ -111,10 +108,6 @@ export const FloatingAIBar: React.FC = () => {
         }
       });
 
-      // Add a placeholder assistant message for streaming
-      setMessages((prev) => [...prev, { role: 'assistant', content: '', reasoning: '' }]);
-
-      // Start the streaming command; it emits ai-stream:token / ai-stream:reasoning / ai-stream:done events
       const payloadPromise: Promise<{ document: any; assistantMessage: string; reasoning?: string }> = invoke('stream_ai_operations', {
         doc: currentDocument,
         messages: conversation.map((m) => ({ role: m.role, content: m.content })),
@@ -128,22 +121,27 @@ export const FloatingAIBar: React.FC = () => {
       unlistenToolCall();
       unlistenDocUpdate();
 
-      // Update the document store with the result
       if (payload.document) {
         useDocumentStore.setState({ currentDocument: payload.document });
       }
 
-      // Finalize with the full response
+      // Only push a final assistant message if we don't already have a non-tool-call one with content
       setMessages((prev) => {
-        const copy = [...prev];
-        const last = copy[copy.length - 1];
-        if (last && last.role === 'assistant') {
-          copy[copy.length - 1] = {
-            role: 'assistant',
-            content: payload.assistantMessage || accumulated,
-            reasoning: payload.reasoning || accumulatedReasoning || undefined,
-          };
+        const last = prev[prev.length - 1];
+        if (!last || last.role === 'user' || last.toolCall) {
+          return [...prev, {
+            role: 'assistant' as const,
+            content: payload.assistantMessage || assistantTokenBuffer,
+            reasoning: payload.reasoning || undefined,
+          }];
         }
+        // Finalize existing assistant message
+        const copy = [...prev];
+        copy[copy.length - 1] = {
+          ...last,
+          content: payload.assistantMessage || assistantTokenBuffer,
+          reasoning: payload.reasoning || last.reasoning || undefined,
+        };
         return copy;
       });
     } catch (err) {
@@ -151,7 +149,7 @@ export const FloatingAIBar: React.FC = () => {
       setMessages((prev) => {
         const copy = [...prev];
         const last = copy[copy.length - 1];
-        if (last && last.role === 'assistant' && !last.content) {
+        if (last && last.role === 'assistant' && !last.content && !last.toolCall) {
           copy[copy.length - 1] = { role: 'assistant', content: `Error: ${err}` };
         } else {
           copy.push({ role: 'assistant', content: `Error: ${err}` });
@@ -163,8 +161,6 @@ export const FloatingAIBar: React.FC = () => {
     }
   };
 
-  if (!isOpen) return null;
-
   return (
     <div className="absolute bottom-6 left-1/2 -translate-x-1/2 z-40 w-[600px] flex flex-col items-center">
       {/* Chat log */}
@@ -173,11 +169,11 @@ export const FloatingAIBar: React.FC = () => {
           ref={listRef}
           className="w-full mb-3 bg-[#0d0f14]/95 border border-slate-800 rounded-2xl p-3 shadow-2xl max-h-[400px] overflow-y-auto space-y-2 relative"
         >
-          {/* Close chat button */}
+          {/* Collapse / expand input bar button */}
           <button
-            onClick={() => setIsOpen(false)}
+            onClick={() => setInputVisible(!inputVisible)}
             className="absolute top-2 right-2 p-1 hover:bg-slate-800 rounded-full text-slate-500 hover:text-slate-300 transition-colors z-10"
-            title="Close AI bar"
+            title={inputVisible ? 'Hide input bar' : 'Show input bar'}
           >
             <X size={12} />
           </button>
@@ -196,8 +192,12 @@ export const FloatingAIBar: React.FC = () => {
               }`}>
                 {msg.toolCall ? (
                   <div className="flex items-center gap-1.5 text-[10px] text-slate-400">
-                    <RefreshCw size={10} className="animate-spin" />
-                    <span>Using <span className="text-orange-400 font-medium">{msg.toolCall}</span>...</span>
+                    {isLoading ? (
+                      <RefreshCw size={10} className="animate-spin" />
+                    ) : (
+                      <span className="text-green-500">✓</span>
+                    )}
+                    <span>Used <span className="text-orange-400 font-medium">{msg.toolCall}</span></span>
                   </div>
                 ) : msg.role === 'assistant' && !msg.content && !msg.reasoning ? (
                   <RefreshCw size={12} className="animate-spin text-slate-400" />
@@ -234,7 +234,8 @@ export const FloatingAIBar: React.FC = () => {
         </div>
       )}
 
-      {/* Floating Bar Container */}
+      {/* Floating Bar Container — hidden when dismissed */}
+      {inputVisible && (
       <form 
         onSubmit={handleSend}
         className={`w-full bg-[#0d0f14]/90 backdrop-blur-md border rounded-full px-4 py-2.5 flex items-center gap-3 shadow-2xl transition-all duration-300
@@ -295,6 +296,7 @@ export const FloatingAIBar: React.FC = () => {
           </button>
         </div>
       </form>
+      )}
     </div>
   );
 };
