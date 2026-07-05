@@ -82,12 +82,10 @@ export const FloatingAIBar: React.FC = () => {
       });
       const unlistenReasoningClear = await listen<string>('ai-stream:reasoning-clear', () => {
         setMessages((prev) => {
-          const copy = [...prev];
-          const last = copy[copy.length - 1];
-          if (last && last.role === 'assistant') {
-            copy[copy.length - 1] = { ...last, reasoning: '' };
-          }
-          return copy;
+          // Remove stale reasoning-only messages (ephemeral thinking placeholders from a previous round)
+          const filtered = prev.filter((m) => !(m.role === 'assistant' && m.reasoning && !m.content && !m.toolCall));
+          // Also clear reasoning from any remaining assistant messages that have it
+          return filtered.map((m) => m.role === 'assistant' ? { ...m, reasoning: undefined } : m);
         });
       });
       const unlistenToolCall = await listen<string>('ai-stream:tool-call', (event) => {
