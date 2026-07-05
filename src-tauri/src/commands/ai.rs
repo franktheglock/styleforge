@@ -113,7 +113,7 @@ fn build_tools() -> serde_json::Value {
                         },
                         "content": {
                             "type": "object",
-                            "description": "Tiptap JSON content node for the section."
+                            "description": "Tiptap JSON content node for the section. Example: {\"type\":\"paragraph\",\"content\":[{\"type\":\"text\",\"text\":\"Hello\"}]}"
                         }
                     },
                     "required": ["section_type"]
@@ -189,7 +189,7 @@ fn build_tools() -> serde_json::Value {
                         },
                         "content": {
                             "type": "object",
-                            "description": "New Tiptap JSON content for the section."
+                            "description": "New Tiptap JSON content for the section. Example: {\"type\":\"paragraph\",\"content\":[{\"type\":\"text\",\"text\":\"Hello\"}]}"
                         }
                     },
                     "required": ["target_id", "content"]
