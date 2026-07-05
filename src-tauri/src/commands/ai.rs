@@ -112,8 +112,8 @@ fn build_tools() -> serde_json::Value {
                             "description": "Style token name to apply to the new section."
                         },
                         "content": {
-                            "type": "object",
-                            "description": "Tiptap JSON content node for the section. Example: {\"type\":\"paragraph\",\"content\":[{\"type\":\"text\",\"text\":\"Hello\"}]}"
+                            "type": "string",
+                            "description": "Plain text content for the new section."
                         }
                     },
                     "required": ["section_type"]
@@ -179,7 +179,7 @@ fn build_tools() -> serde_json::Value {
             "type": "function",
             "function": {
                 "name": "update_section_content",
-                "description": "Replace the Tiptap JSON content of an existing section.",
+                "description": "Replace the text content of an existing section.",
                 "parameters": {
                     "type": "object",
                     "properties": {
@@ -188,8 +188,8 @@ fn build_tools() -> serde_json::Value {
                             "description": "The ID of the section to update."
                         },
                         "content": {
-                            "type": "object",
-                            "description": "New Tiptap JSON content for the section. Example: {\"type\":\"paragraph\",\"content\":[{\"type\":\"text\",\"text\":\"Hello\"}]}"
+                            "type": "string",
+                            "description": "New plain text content for the section."
                         }
                     },
                     "required": ["target_id", "content"]
@@ -617,6 +617,13 @@ fn extract_args_value(call: &serde_json::Value) -> Option<serde_json::Value> {
     }
 }
 
+fn text_to_tiptap_content(text: &str) -> serde_json::Value {
+    serde_json::json!({
+        "type": "paragraph",
+        "content": [{"type": "text", "text": text}]
+    })
+}
+
 fn tool_call_to_operation(func_name: &str, args: serde_json::Value) -> Result<AICommandOperation, String> {
     match func_name {
         "insert_section" => Ok(AICommandOperation {
@@ -625,7 +632,7 @@ fn tool_call_to_operation(func_name: &str, args: serde_json::Value) -> Result<AI
             after_id: args.get("after_id").and_then(|v| v.as_str()).map(|s| s.to_string()),
             section_type: args.get("section_type").and_then(|v| v.as_str()).map(|s| s.to_string()),
             style_token: args.get("style_token").and_then(|v| v.as_str()).map(|s| s.to_string()),
-            content: args.get("content").cloned(),
+            content: args.get("content").and_then(|v| v.as_str()).map(|s| text_to_tiptap_content(s)),
         }),
         "move_section" => Ok(AICommandOperation {
             operation: "moveSection".to_string(),
@@ -657,7 +664,7 @@ fn tool_call_to_operation(func_name: &str, args: serde_json::Value) -> Result<AI
             after_id: None,
             section_type: None,
             style_token: None,
-            content: args.get("content").cloned(),
+            content: args.get("content").and_then(|v| v.as_str()).map(|s| text_to_tiptap_content(s)),
         }),
         _ => Err(format!("Unknown tool: {}", func_name)),
     }
