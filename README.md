@@ -19,17 +19,18 @@ StyleForge is a powerful document editor that combines rich text editing with a 
 
 - **Rich Text Editing** — Powered by [TipTap](https://tiptap.dev/), with sections for headings, paragraphs, lists (bullets & ordered), tables, and dividers
 - **Style Tokens** — A CSS-like style system where each section references a token (e.g. `heading`, `body`, `bullet`, `divider`). Tokens define typography, spacing, colors, borders, and more — all editable in real time via a sidebar inspector
-- **AI Assistant** — A floating command bar that lets you edit document structure with natural language. "Move the Skills section above Education", "Add a table after the header", "Delete the second paragraph" — the AI agent translates these into structural operations using the `edit_document_structure` tool
+- **AI Assistant** — A floating command bar with streaming responses, live thinking/reasoning display, and real-time tool call execution. "Move the Skills section above Education", "Add a table after the header", "Delete the second paragraph" — the AI agent translates these into structural operations using dedicated tools (`insert_section`, `move_section`, `delete_section`, `duplicate_section`, `update_section_content`)
 - **Multiple LLM Providers** — Bring your own AI backend. Supports:
-  - [Ollama](https://ollama.com/) (local)
   - [LM Studio](https://lmstudio.ai/) (local)
   - [Llama.cpp](https://github.com/ggerganov/llama.cpp) (local/remote)
   - [OpenRouter](https://openrouter.ai/) (cloud)
   - [NVIDIA NIM](https://build.nvidia.com/) (cloud)
   - Custom OpenAI-compatible endpoints
-- **Import & Export** — JSON, Markdown, HTML, and DOCX
-- **Drag-and-Drop** — Reorder sections by dragging them in the sidebar
+- **Import & Export** — JSON, Markdown, HTML, DOCX, and PDF (text extraction)
+- **Drag-and-Drop** — Reorder sections by dragging their grip handles (pointer-based, works reliably in Tauri WebView2)
+- **Style Token Drag** — Drag token pills from the sidebar onto sections to apply them
 - **Undo/Redo** — Full history stack (up to 50 states)
+- **Streaming AI** — Responses streamed token-by-token; thinking/reasoning shown live in a collapsible dropdown; tool calls displayed in real time with document updates applied immediately
 - **Token Inheritance** — Section-level overrides with automatic token cloning when you edit a shared token on a single section
 
 ## Architecture
@@ -98,7 +99,6 @@ The bundled installer/executable will be in `src-tauri/target/release/bundle/`.
 To use the AI assistant, you need at least one provider configured. Open the **Settings** modal (gear icon in the floating AI bar) and add a provider.
 
 **Local (recommended for privacy):**
-- **Ollama:** `http://127.0.0.1:11434`, model: `llama3`, `mistral`, etc.
 - **LM Studio:** `http://127.0.0.1:1234`, any loaded model
 - **Llama.cpp:** your server URL, any loaded model
 
@@ -106,7 +106,7 @@ To use the AI assistant, you need at least one provider configured. Open the **S
 - **OpenRouter:** `https://openrouter.ai/api/v1`, API key required
 - **NVIDIA NIM:** `https://api.nvcf.nvidia.com/v1`, API key required
 
-The AI agent uses OpenAI-compatible function/tool calling. It has one tool — `edit_document_structure` — which accepts an array of operations (`add_section`, `delete_section`, `reorder_sections`, `update_section_content`, `update_style_token`).
+The AI agent uses OpenAI-compatible tool calling with five dedicated tools: `insert_section`, `move_section`, `delete_section`, `duplicate_section`, and `update_section_content`. Each tool maps to a single structural operation with typed parameters. The agent calls a tool, sees the result, then responds conversationally in a multi-turn stream.
 
 ## Development
 
@@ -122,7 +122,6 @@ The AI agent uses OpenAI-compatible function/tool calling. It has one tool — `
 ├── src-tauri/                    # Rust backend
 │   └── src/
 │       ├── ai/                   # AI provider implementations
-│       │   ├── ollama.rs
 │       │   ├── lmstudio.rs
 │       │   ├── llamacpp.rs
 │       │   ├── openrouter.rs
