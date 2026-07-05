@@ -97,9 +97,9 @@ export const FloatingAIBar: React.FC = () => {
           // If last message is already a tool call for a different tool, push another
           // Otherwise update or push
           if (last && last.toolCall) {
-            copy.push({ role: 'assistant', toolCall: event.payload });
+            copy.push({ role: 'assistant', content: '', toolCall: event.payload });
           } else {
-            copy.push({ role: 'assistant', toolCall: event.payload });
+            copy.push({ role: 'assistant', content: '', toolCall: event.payload });
           }
           return copy;
         });
@@ -112,7 +112,7 @@ export const FloatingAIBar: React.FC = () => {
 
       const payloadPromise: Promise<{ document: any; assistantMessage: string; reasoning?: string }> = invoke('stream_ai_operations', {
         doc: currentDocument,
-        messages: conversation.map((m) => ({ role: m.role, content: m.content })),
+        messages: conversation.map((m) => ({ role: m.role, content: m.content || '' })),
         providerId: selectedProviderId,
       });
 
