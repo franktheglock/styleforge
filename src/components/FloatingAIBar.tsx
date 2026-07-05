@@ -203,7 +203,7 @@ export const FloatingAIBar: React.FC = () => {
                 ) : (
                   <>
                     {msg.reasoning && (
-                      <details open className="mb-1.5 group cursor-pointer">
+                      <details open={isLoading && i === messages.length - 1} className="mb-1.5 group cursor-pointer">
                         <summary className="flex items-center gap-1.5 text-[10px] text-slate-500 hover:text-slate-300 transition-colors select-none">
                           <ChevronDown size={10} className="transition-transform group-open:rotate-180" />
                           <Brain size={10} />
