@@ -41,6 +41,8 @@ export const FloatingAIBar: React.FC = () => {
     e.preventDefault();
     if (!input.trim() || isLoading || !selectedProviderId) return;
 
+    setChatVisible(true);
+
     const userText = input.trim();
     setInput('');
     const userMsg: Msg = { role: 'user', content: userText };
